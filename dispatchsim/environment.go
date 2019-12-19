@@ -3,19 +3,21 @@ package dispatchsim
 import (
 	"fmt"
 	"math"
-	"strconv"
 	"sync"
 	"time"
 )
 
 type Environment struct {
-	DriverAgents []DriverAgent
-	TaskQueue    chan Task
-	FinishQueue  chan Task
-	IntialTasks  int
-	MasterSpeed  time.Duration
-	Quit         chan struct{}
-	WaitGroup    *sync.WaitGroup // for ending simulation
+	S                    *Simulation
+	Id                   int
+	DriverAgents         []DriverAgent
+	IncomingDriversQueue chan DriverAgent // TODO: for migrating drivers
+	TaskQueue            chan Task
+	FinishQueue          chan Task
+	TotalTasks           int
+	MasterSpeed          time.Duration
+	Quit                 chan struct{}
+	WaitGroup            *sync.WaitGroup // for ending simulation
 }
 
 // generate tasks
@@ -32,55 +34,36 @@ func (e *Environment) GenerateDriver(name string, id int) {
 		CreateDriver(id, e))
 }
 
-// func (e *Environment) GenerateCustomer(name string, id int) {
-// 	e.CustomerAgents = append(e.CustomerAgents,
-// 		CustomerAgent{Name: name, Id: id})
-// }
-
-func (e *Environment) Run() {
+func (e *Environment) Run(startingDriverId int) {
 	for i := 0; i < len(e.DriverAgents); i++ {
-		e.DriverAgents[i] = CreateDriver(i, e)
+		e.DriverAgents[i] = CreateDriver(startingDriverId, e)
 		go e.DriverAgents[i].ProcessTask()
+		startingDriverId++
 	}
-	go dispatcher(e)
 
-	for i := 0; i < e.IntialTasks; i++ {
-		e.GenerateTask(i)
-	}
+	go dispatcher(e)
 
 	// condition to end simulation
 	var countTask int = 0
+End:
 	for {
 		select {
-		case x := <-e.FinishQueue:
-			fmt.Println("Task " + strconv.Itoa(x.Id) + " completed :)")
+		case task := <-e.FinishQueue:
+			fmt.Printf("[Environment %d]Task %d completed :) \n", e.Id, task.Id)
 			countTask++
-			fmt.Println("Task completed: " + strconv.Itoa(countTask) + "/" + strconv.Itoa(e.IntialTasks))
+			fmt.Printf("[Environment %d]Task completed: %d / %d\n", e.Id, countTask, e.TotalTasks)
 		}
 
-		if countTask == e.IntialTasks {
-			fmt.Println("[Simulation] All tasks completed")
-			break
+		if countTask == e.TotalTasks {
+			fmt.Printf("[Environment %d]All tasks completed\n", e.Id)
+			break End
 		}
 	}
 
 	// closing simluation
-	close(e.Quit)
-	e.WaitGroup.Done()
-	fmt.Println("[Simulation] Simulation end")
+	close(e.Quit) // stop all driver agent goroutines and dispatcher
+	fmt.Printf("[Environment %d]Environment ended\n", e.Id)
 	return
-}
-
-func SetupEnvironment(noOfDrivers int, noOfTask int, wg *sync.WaitGroup) Environment {
-	return Environment{
-		DriverAgents: make([]DriverAgent, noOfDrivers),
-		TaskQueue:    make(chan Task, 10000),
-		FinishQueue:  make(chan Task, 10000),
-		IntialTasks:  noOfTask,
-		MasterSpeed:  100,
-		Quit:         make(chan struct{}), // for stopping dispatcher and drivers
-		WaitGroup:    wg,                  // for stopping simulation
-	}
 }
 
 func (e *Environment) Stats() {

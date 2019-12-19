@@ -55,7 +55,7 @@ func CreateDriver(id int, e *Environment) DriverAgent {
 }
 
 func (d *DriverAgent) ProcessTask() {
-	tick := time.Tick(d.E.MasterSpeed * time.Millisecond)
+	tick := time.Tick(d.E.S.MasterSpeed * time.Millisecond)
 	for {
 		select {
 		case <-d.E.Quit:
@@ -65,6 +65,7 @@ func (d *DriverAgent) ProcessTask() {
 			switch d.Status {
 			case Roaming:
 				fmt.Println("Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String())
+				d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
 				select {
 				case t := <-d.Request:
 					d.Status = Matching

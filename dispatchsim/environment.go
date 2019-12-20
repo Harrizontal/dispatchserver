@@ -2,6 +2,7 @@ package dispatchsim
 
 import (
 	"fmt"
+	"log"
 	"math"
 	"sync"
 	"time"
@@ -10,7 +11,8 @@ import (
 type Environment struct {
 	S                    *Simulation
 	Id                   int
-	DriverAgents         []DriverAgent
+	DriverAgents2        map[int]*DriverAgent
+	NoOfIntialDrivers    int
 	IncomingDriversQueue chan DriverAgent // TODO: for migrating drivers
 	TaskQueue            chan Task
 	FinishQueue          chan Task
@@ -20,24 +22,52 @@ type Environment struct {
 	WaitGroup            *sync.WaitGroup // for ending simulation
 }
 
+func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bool, generateTasks bool) Environment {
+	return Environment{
+		S:                    s,
+		Id:                   id,
+		DriverAgents2:        make(map[int]*DriverAgent),
+		NoOfIntialDrivers:    noOfDrivers,
+		IncomingDriversQueue: make(chan DriverAgent, 1000),
+		TaskQueue:            make(chan Task, 10000),
+		FinishQueue:          make(chan Task, 10000),
+		TotalTasks:           0,
+		MasterSpeed:          100,
+		Quit:                 make(chan struct{}), // for stopping dispatcher and drivers
+	}
+}
+
 // generate tasks
 func (e *Environment) GenerateTask(d int) {
 	task := CreateTask(d)
-	fmt.Println("New Task Generated!")
+	fmt.Printf("[Environment %d]New Task Generated! - Task %d \n", e.Id, d)
 	e.TaskQueue <- task
 }
 
 // generate new drivers
 //TODO: how to get last index no...?
 func (e *Environment) GenerateDriver(name string, id int) {
-	e.DriverAgents = append(e.DriverAgents,
-		CreateDriver(id, e))
+	//e.DriverAgents = append(e.DriverAgents, CreateDriver(id, e))
+	if _, ok := e.DriverAgents2[id]; !ok {
+		driver := CreateDriver(id, e)
+		e.DriverAgents2[id] = &driver
+	} else {
+		log.Fatal("Driver exists!")
+	}
+
 }
 
 func (e *Environment) Run(startingDriverId int) {
-	for i := 0; i < len(e.DriverAgents); i++ {
-		e.DriverAgents[i] = CreateDriver(startingDriverId, e)
-		go e.DriverAgents[i].ProcessTask()
+	// for i := 0; i < len(e.DriverAgents); i++ {
+	// 	e.DriverAgents[i] = CreateDriver(startingDriverId, e)
+	// 	go e.DriverAgents[i].ProcessTask()
+	// 	startingDriverId++
+	// }
+
+	for i := 0; i < e.NoOfIntialDrivers; i++ {
+		driver := CreateDriver(startingDriverId, e)
+		e.DriverAgents2[startingDriverId] = &driver
+		go e.DriverAgents2[startingDriverId].ProcessTask()
 		startingDriverId++
 	}
 
@@ -63,20 +93,31 @@ End:
 	// closing simluation
 	close(e.Quit) // stop all driver agent goroutines and dispatcher
 	fmt.Printf("[Environment %d]Environment ended\n", e.Id)
+	e.Stats()
 	return
 }
 
 func (e *Environment) Stats() {
 	fmt.Println("Stats:")
-	for i := 0; i < len(e.DriverAgents); i++ {
-		fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f\n",
-			i,
-			e.DriverAgents[i].TasksCompleted,
-			e.DriverAgents[i].Reputation,
-			e.DriverAgents[i].Fatigue,
-			e.DriverAgents[i].Motivation,
-			e.DriverAgents[i].Regret)
+	for k, v := range e.DriverAgents2 {
+		fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f, Ranking Index: %f\n",
+			k,
+			v.TasksCompleted,
+			v.Reputation,
+			v.Fatigue,
+			v.Motivation,
+			v.Regret,
+			v.GetRankingIndex())
 	}
+	// for i := 0; i < len(e.DriverAgents); i++ {
+	// 	fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f\n",
+	// 		i,
+	// 		e.DriverAgents[i].TasksCompleted,
+	// 		e.DriverAgents[i].Reputation,
+	// 		e.DriverAgents[i].Fatigue,
+	// 		e.DriverAgents[i].Motivation,
+	// 		e.DriverAgents[i].Regret)
+	// }
 }
 
 // compute average value of orders with similiar rating
@@ -84,19 +125,18 @@ func (e *Environment) Stats() {
 func (e *Environment) ComputeAverageValue(reputation float64) float64 {
 	var accumulatedTaskValue = 0
 	var totalDriversWithTask = 0
-	for i := 0; i < len(e.DriverAgents); i++ {
-		if e.DriverAgents[i].CurrentTask.Id >= 0 &&
-			e.DriverAgents[i].Status != Roaming { // bad way to compare whether currenttask not null
-			// Check with zi chao/prof yu on calculating average value of orders among drivers (all? those currently have? )
+
+	for _, v := range e.DriverAgents2 {
+		if v.CurrentTask.Id >= 0 && v.Status != Roaming {
 			fmt.Printf("Driver %d has Task %d with value of %d \n",
-				e.DriverAgents[i].Id,
-				e.DriverAgents[i].CurrentTask.Id,
-				e.DriverAgents[i].CurrentTask.Value)
-			accumulatedTaskValue = e.DriverAgents[i].CurrentTask.Value + accumulatedTaskValue
+				v.Id,
+				v.CurrentTask.Id,
+				v.CurrentTask.Value,
+			)
+			accumulatedTaskValue = v.CurrentTask.Value + accumulatedTaskValue
 			totalDriversWithTask++
 		}
 	}
-
 	averageTaskValue := float64(accumulatedTaskValue) / float64(totalDriversWithTask)
 
 	if math.IsNaN(averageTaskValue) {

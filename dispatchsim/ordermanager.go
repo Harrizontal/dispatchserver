@@ -18,6 +18,9 @@ type Order struct {
 	DropOffLat    string
 }
 
+/**
+Distribute Task orders from csv, to environment
+**/
 func OrderDistributor(s *Simulation) {
 	var orderId int = 0
 	for {
@@ -25,11 +28,10 @@ func OrderDistributor(s *Simulation) {
 		case order := <-s.OrderQueue:
 			if len(s.Environments) > 0 {
 			K:
-				for i := 0; i < len(s.Environments); i++ {
-					fmt.Printf("generating task %d\n", orderId)
-					s.Environments[i].TotalTasks = s.Environments[i].TotalTasks + 1
-					// fmt.Printf("Total: %d", s.Environments[i].TotalTasks)
-					s.Environments[i].GenerateTask(orderId)
+				for k, v := range s.Environments {
+					fmt.Printf("[OrderDistributor]Allocating Task %d to Environment %d\n", orderId, k)
+					v.TotalTasks = v.TotalTasks + 1
+					v.GenerateTask(orderId)
 					orderId++
 					break K
 				}
@@ -37,7 +39,6 @@ func OrderDistributor(s *Simulation) {
 				//fmt.Println("[OrderDispatcher] Adding back")
 				s.OrderQueue <- order
 			}
-
 		default:
 			//fmt.Printf("Simulation: %d \n", len(s.Environments))
 		}
@@ -46,6 +47,9 @@ func OrderDistributor(s *Simulation) {
 	//fmt.Println("[OrderDispatcher] Stop")
 }
 
+/**
+Retrieve order from csv.
+**/
 func OrderRetriever(s *Simulation) {
 	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/order1.csv")
 	if err != nil {
@@ -77,7 +81,7 @@ func OrderRetriever(s *Simulation) {
 		// i, _ := strconv.ParseInt(order[i].RideStartTime, 10, 64)
 		// tm := time.Unix(i, 0)
 
-		fmt.Printf("[OrderRetriever] Order %v\n", order[i].OrderID)
+		fmt.Printf("[OrderRetriever]Order %v\n", order[i].OrderID)
 		s.OrderQueue <- order[i].OrderID
 	}
 }

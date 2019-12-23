@@ -11,7 +11,7 @@ import (
 type Environment struct {
 	S                    *Simulation
 	Id                   int
-	DriverAgents2        map[int]*DriverAgent
+	DriverAgents         map[int]*DriverAgent
 	NoOfIntialDrivers    int
 	IncomingDriversQueue chan DriverAgent // TODO: for migrating drivers
 	TaskQueue            chan Task
@@ -26,7 +26,7 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 	return Environment{
 		S:                    s,
 		Id:                   id,
-		DriverAgents2:        make(map[int]*DriverAgent),
+		DriverAgents:         make(map[int]*DriverAgent),
 		NoOfIntialDrivers:    noOfDrivers,
 		IncomingDriversQueue: make(chan DriverAgent, 1000),
 		TaskQueue:            make(chan Task, 10000),
@@ -48,9 +48,9 @@ func (e *Environment) GenerateTask(d int) {
 //TODO: how to get last index no...?
 func (e *Environment) GenerateDriver(name string, id int) {
 	//e.DriverAgents = append(e.DriverAgents, CreateDriver(id, e))
-	if _, ok := e.DriverAgents2[id]; !ok {
+	if _, ok := e.DriverAgents[id]; !ok {
 		driver := CreateDriver(id, e)
-		e.DriverAgents2[id] = &driver
+		e.DriverAgents[id] = &driver
 	} else {
 		log.Fatal("Driver exists!")
 	}
@@ -66,8 +66,8 @@ func (e *Environment) Run(startingDriverId int) {
 
 	for i := 0; i < e.NoOfIntialDrivers; i++ {
 		driver := CreateDriver(startingDriverId, e)
-		e.DriverAgents2[startingDriverId] = &driver
-		go e.DriverAgents2[startingDriverId].ProcessTask()
+		e.DriverAgents[startingDriverId] = &driver
+		go e.DriverAgents[startingDriverId].ProcessTask2()
 		startingDriverId++
 	}
 
@@ -99,7 +99,7 @@ End:
 
 func (e *Environment) Stats() {
 	fmt.Println("Stats:")
-	for k, v := range e.DriverAgents2 {
+	for k, v := range e.DriverAgents {
 		fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f, Ranking Index: %f\n",
 			k,
 			v.TasksCompleted,
@@ -126,7 +126,7 @@ func (e *Environment) ComputeAverageValue(reputation float64) float64 {
 	var accumulatedTaskValue = 0
 	var totalDriversWithTask = 0
 
-	for _, v := range e.DriverAgents2 {
+	for _, v := range e.DriverAgents {
 		if v.CurrentTask.Id >= 0 && v.Status != Roaming {
 			fmt.Printf("Driver %d has Task %d with value of %d \n",
 				v.Id,

@@ -19,7 +19,7 @@ func dispatcher(e *Environment) {
 
 			noOfRoamingDrivers := 0
 			var roamingDrivers = make([]*DriverAgent, 0)
-			for _, v := range e.DriverAgents2 {
+			for _, v := range e.DriverAgents {
 				if v.Status == Roaming {
 					roamingDrivers = append(roamingDrivers, v)
 					noOfRoamingDrivers++

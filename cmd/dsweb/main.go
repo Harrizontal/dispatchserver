@@ -46,6 +46,7 @@ func reader(conn *websocket.Conn) {
 		//fmt.Println("[Server]Waiting for message from client")
 		_, p, err := conn.ReadMessage()
 		if err != nil {
+			fmt.Printf("Error\n")
 			log.Println(err)
 			return
 		}
@@ -80,5 +81,4 @@ func main() {
 	go simulator.Run()
 	setupRoutes()
 	log.Fatal(http.ListenAndServe(":8080", nil))
-
 }

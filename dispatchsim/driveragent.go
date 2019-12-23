@@ -20,20 +20,24 @@ func (d DriverStatus) String() string {
 }
 
 type DriverAgent struct {
-	E               *Environment
-	Id              int
-	Name            string
-	CurrentLocation int  // change to lat,lng
-	PendingTask     Task // store task during matching
-	CurrentTask     Task // store task when fetching/travelling
-	Status          DriverStatus
-	Request         chan Message
-	TasksCompleted  int
-	TaskHistory     []Task
-	Motivation      float64
-	Reputation      float64
-	Fatigue         float64
-	Regret          float64
+	E                   *Environment
+	Id                  int
+	Name                string
+	CurrentLocation     LatLng
+	Waypoint            []LatLng
+	DestinationLocation LatLng
+	PendingTask         Task // store task during matching
+	CurrentTask         Task // store task when fetching/travelling
+	Status              DriverStatus
+	Request             chan Message
+	Recieve             chan Message // receive
+	Send                chan string  // send
+	TasksCompleted      int
+	TaskHistory         []Task
+	Motivation          float64
+	Reputation          float64
+	Fatigue             float64
+	Regret              float64
 }
 
 // Random point
@@ -45,6 +49,8 @@ func CreateDriver(id int, e *Environment) DriverAgent {
 		Name:           "John",
 		Status:         Roaming,
 		Request:        make(chan Message),
+		Recieve:        make(chan Message),
+		Send:           make(chan string),
 		TasksCompleted: 0,
 		TaskHistory:    make([]Task, 0),
 		Motivation:     100,
@@ -131,6 +137,80 @@ func (d *DriverAgent) ProcessTask() {
 				d.Status = Roaming
 				fmt.Println("Driver " + strconv.Itoa(d.Id) + " is completed the ride")
 				fmt.Println("Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String())
+			}
+		}
+	}
+}
+
+func (d *DriverAgent) ProcessTask2() {
+	go d.Drive()
+	tick := time.Tick(d.E.S.MasterSpeed * time.Millisecond)
+	for {
+		select {
+		case <-d.E.Quit:
+			//fmt.Println("Driver " + strconv.Itoa(d.Id) + " ended his day")
+			return
+		case <-tick:
+			switch d.Status {
+			case Roaming:
+			case Matching:
+			case Fetching:
+			case Travelling:
+
+			}
+		}
+	}
+}
+
+func (d *DriverAgent) Drive() {
+	//1. Request for a random point
+	//stringArray := []string{"2", "1", strconv.Itoa(d.E.Id), strconv.Itoa(d.Id)}
+	//justString := strings.Join(stringArray, ",")
+	d.E.S.Send <- "2,4," + strconv.Itoa(d.E.Id) + "," + strconv.Itoa(d.Id) + ",[1,2],[3,4]"
+
+	for {
+		select {
+		case <-d.E.Quit:
+			return
+		case x := <-d.Recieve:
+			switch x.CommandSecondType {
+			case 0:
+				fmt.Printf("[Driver %d]Saving random point (lat:%f,lng:%f) to current location \n", d.Id, x.LatLng.Lat, x.LatLng.Lng)
+				d.CurrentLocation = x.LatLng
+
+			case 1:
+				fmt.Printf("[Driver %d]Intialization of Driver (Start:%f, End:%f)\n", d.Id, x.StartDestinationWaypoint.StartLocation, x.StartDestinationWaypoint.DestinationLocation)
+				d.CurrentLocation = x.StartDestinationWaypoint.DestinationLocation
+				d.DestinationLocation = x.StartDestinationWaypoint.DestinationLocation
+				d.Waypoint = x.StartDestinationWaypoint.Waypoint
+
+				fmt.Printf("Current Location: %v, DestinationLocation: %v, Waypoint: %v \n", d.CurrentLocation, d.DestinationLocation, d.Waypoint)
+			case 2:
+				fmt.Printf("[Driver %d]Setting waypoint\n", d.Id)
+				d.Waypoint = x.Waypoint
+			case 3:
+				if x.Success == true {
+					fmt.Printf("[Driver %d] Node generated\n", d.Id)
+				} else {
+					fmt.Printf("[Driver %d] Node failed to generate\n", d.Id)
+				}
+			case 4:
+				if x.Success == true {
+					fmt.Printf("[Driver %d] Driver moved successfully\n", d.Id)
+				} else {
+					fmt.Printf("[Driver %d] Node failed to move\n", d.Id)
+				}
+			}
+
+			// or remove everything below, and just go to the next location in the array
+			switch d.Status {
+			case Roaming: // or is matching too...
+				// go next location in the array (send)
+				// check got task
+			case Fetching:
+				// go next location in the array (send)
+			case Travelling:
+				// go next location in the array (send)
 			}
 		}
 	}

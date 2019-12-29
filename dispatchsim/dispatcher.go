@@ -31,10 +31,10 @@ func dispatcher(e *Environment) {
 				return roamingDrivers[i].GetRankingIndex() > roamingDrivers[j].GetRankingIndex()
 			})
 
-			fmt.Printf("NoOfRoamingDrivers: %d\n", noOfRoamingDrivers)
+			//fmt.Printf("NoOfRoamingDrivers: %d\n", noOfRoamingDrivers)
 
 			if noOfRoamingDrivers > 0 {
-				fmt.Println("[Dispatcher]Start allocation")
+				//fmt.Println("[Dispatcher]Start allocation")
 				tasks := GetValuableTasks(noOfRoamingDrivers, e.TaskQueue)
 				if len(tasks) > 0 {
 					for i := 0; i < len(tasks); i++ {
@@ -83,6 +83,7 @@ K:
 		select {
 		case x := <-TaskQueue:
 			fmt.Printf("[GVT]Grab Task %d \n", x.Id)
+			fmt.Printf("Task address @ Grab task: %p \n", &x)
 			tasks = append(tasks, x)
 		default:
 			// if no more tasks in channel, break.

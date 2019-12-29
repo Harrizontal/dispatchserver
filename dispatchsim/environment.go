@@ -14,6 +14,7 @@ type Environment struct {
 	DriverAgents         map[int]*DriverAgent
 	NoOfIntialDrivers    int
 	IncomingDriversQueue chan DriverAgent // TODO: for migrating drivers
+	Tasks                map[string]*Task // store all tasks
 	TaskQueue            chan Task
 	FinishQueue          chan Task
 	TotalTasks           int
@@ -29,6 +30,7 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 		DriverAgents:         make(map[int]*DriverAgent),
 		NoOfIntialDrivers:    noOfDrivers,
 		IncomingDriversQueue: make(chan DriverAgent, 1000),
+		Tasks:                make(map[string]*Task), // id -> task
 		TaskQueue:            make(chan Task, 10000),
 		FinishQueue:          make(chan Task, 10000),
 		TotalTasks:           0,
@@ -38,10 +40,12 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 }
 
 // generate tasks
-func (e *Environment) GenerateTask(d int) {
-	task := CreateTask(d)
-	fmt.Printf("[Environment %d]New Task Generated! - Task %d \n", e.Id, d)
+func (e *Environment) GiveTask(o Order) {
+	task := CreateTaskFromOrder(o)
+	fmt.Printf("[Environment %d]New Task Generated! - Task %v \n", e.Id, task.Id)
 	e.TaskQueue <- task
+	e.Tasks[task.Id] = &task
+	fmt.Printf("Task address @ givetask function: %p \n", &task)
 }
 
 // generate new drivers
@@ -74,27 +78,27 @@ func (e *Environment) Run(startingDriverId int) {
 	go dispatcher(e)
 
 	// condition to end simulation
-	var countTask int = 0
-End:
-	for {
-		select {
-		case task := <-e.FinishQueue:
-			fmt.Printf("[Environment %d]Task %d completed :) \n", e.Id, task.Id)
-			countTask++
-			fmt.Printf("[Environment %d]Task completed: %d / %d\n", e.Id, countTask, e.TotalTasks)
-		}
+	// 	var countTask int = 0
+	// End:
+	// 	for {
+	// 		select {
+	// 		case task := <-e.FinishQueue:
+	// 			fmt.Printf("[Environment %d]Task %d completed :) \n", e.Id, task.Id)
+	// 			countTask++
+	// 			fmt.Printf("[Environment %d]Task completed: %d / %d\n", e.Id, countTask, e.TotalTasks)
+	// 		}
 
-		if countTask == e.TotalTasks {
-			fmt.Printf("[Environment %d]All tasks completed\n", e.Id)
-			break End
-		}
-	}
+	// 		if countTask == e.TotalTasks {
+	// 			fmt.Printf("[Environment %d]All tasks completed\n", e.Id)
+	// 			break End
+	// 		}
+	// 	}
 
-	// closing simluation
-	close(e.Quit) // stop all driver agent goroutines and dispatcher
-	fmt.Printf("[Environment %d]Environment ended\n", e.Id)
-	e.Stats()
-	return
+	// 	// closing simluation
+	// 	close(e.Quit) // stop all driver agent goroutines and dispatcher
+	// 	fmt.Printf("[Environment %d]Environment ended\n", e.Id)
+	// 	e.Stats()
+	// 	return
 }
 
 func (e *Environment) Stats() {
@@ -127,7 +131,7 @@ func (e *Environment) ComputeAverageValue(reputation float64) float64 {
 	var totalDriversWithTask = 0
 
 	for _, v := range e.DriverAgents {
-		if v.CurrentTask.Id >= 0 && v.Status != Roaming {
+		if v.CurrentTask.Id != "null" && v.Status != Roaming {
 			fmt.Printf("Driver %d has Task %d with value of %d \n",
 				v.Id,
 				v.CurrentTask.Id,

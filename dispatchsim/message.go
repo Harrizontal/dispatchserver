@@ -8,6 +8,7 @@ type Message struct {
 	StartDestinationWaypoint StartDestinationWaypoint // case 1
 	Waypoint                 []LatLng                 // case:2
 	Success                  bool
+	LocationArrived          LatLng
 }
 
 //1

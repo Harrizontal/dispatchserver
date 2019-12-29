@@ -6,33 +6,32 @@ import (
 	"io"
 	"log"
 	"os"
+	"strconv"
 )
 
 type Order struct {
-	OrderID       string
+	Id            string
 	RideStartTime string
 	RideStopTime  string
-	PickUpLong    string
-	PickUpLat     string
-	DropOffLong   string
-	DropOffLat    string
+	PickUpLng     float64
+	PickUpLat     float64
+	DropOffLng    float64
+	DropOffLat    float64
 }
 
 /**
 Distribute Task orders from csv, to environment
 **/
 func OrderDistributor(s *Simulation) {
-	var orderId int = 0
 	for {
 		select {
 		case order := <-s.OrderQueue:
 			if len(s.Environments) > 0 {
 			K:
 				for k, v := range s.Environments {
-					fmt.Printf("[OrderDistributor]Allocating Task %d to Environment %d\n", orderId, k)
-					v.TotalTasks = v.TotalTasks + 1
-					v.GenerateTask(orderId)
-					orderId++
+					fmt.Printf("[OrderDistributor]Allocating Task %d to Environment %d\n", order.Id, k)
+					v.TotalTasks = v.TotalTasks + 1 // increment totaltasks
+					v.GiveTask(order)
 					break K
 				}
 			} else {
@@ -51,7 +50,7 @@ func OrderDistributor(s *Simulation) {
 Retrieve order from csv.
 **/
 func OrderRetriever(s *Simulation) {
-	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/order1.csv")
+	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/singaporeorder.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -67,13 +66,13 @@ func OrderRetriever(s *Simulation) {
 			log.Fatal(error)
 		}
 		order = append(order, Order{
-			OrderID:       line[0],
+			Id:            line[0],
 			RideStartTime: line[1],
 			RideStopTime:  line[2],
-			PickUpLong:    line[3],
-			PickUpLat:     line[4],
-			DropOffLong:   line[5],
-			DropOffLat:    line[6],
+			PickUpLng:     ParseFloatResult(line[3]),
+			PickUpLat:     ParseFloatResult(line[4]),
+			DropOffLng:    ParseFloatResult(line[5]),
+			DropOffLat:    ParseFloatResult(line[6]),
 		})
 	}
 
@@ -81,7 +80,12 @@ func OrderRetriever(s *Simulation) {
 		// i, _ := strconv.ParseInt(order[i].RideStartTime, 10, 64)
 		// tm := time.Unix(i, 0)
 
-		fmt.Printf("[OrderRetriever]Order %v\n", order[i].OrderID)
-		s.OrderQueue <- order[i].OrderID
+		fmt.Printf("[OrderRetriever]Order %v\n", order[i].Id)
+		s.OrderQueue <- order[i]
 	}
+}
+
+func ParseFloatResult(f string) float64 {
+	s, _ := strconv.ParseFloat(f, 64)
+	return s
 }

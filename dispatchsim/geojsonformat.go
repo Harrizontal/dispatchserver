@@ -24,8 +24,9 @@ type Properties struct {
 }
 
 type DriverFormat struct {
-	Id     int          `json:"id"`
-	Status DriverStatus `json:"status"`
+	Id          int          `json:"id"`
+	Status      DriverStatus `json:"status"`
+	CurrentTask string       `json:"current_task_id"`
 }
 
 type TaskFormat struct {

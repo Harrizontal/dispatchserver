@@ -11,6 +11,7 @@ import (
 type Environment struct {
 	S                    *Simulation
 	Id                   int
+	Polygon              []LatLng
 	DriverAgents         map[int]*DriverAgent
 	NoOfIntialDrivers    int
 	IncomingDriversQueue chan DriverAgent // TODO: for migrating drivers
@@ -27,6 +28,7 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 	return Environment{
 		S:                    s,
 		Id:                   id,
+		Polygon:              make([]LatLng, 0),
 		DriverAgents:         make(map[int]*DriverAgent),
 		NoOfIntialDrivers:    noOfDrivers,
 		IncomingDriversQueue: make(chan DriverAgent, 1000),

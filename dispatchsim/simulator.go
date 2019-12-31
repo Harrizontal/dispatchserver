@@ -60,8 +60,8 @@ func (s *Simulation) Run() {
 				environmentId++
 			case 2: // drivers
 				commandTypeLevelTwo := command.([]interface{})[1].(float64)
-				eId := int(command.([]interface{})[2].(float64))
-				dId := int(command.([]interface{})[3].(float64))
+				eId := int(command.([]interface{})[2].(float64)) // get environmentid from the message
+				dId := int(command.([]interface{})[3].(float64)) // get driverId from the message
 				switch commandTypeLevelTwo {
 				case 0:
 					//fmt.Printf("[Simulator]Recieve random point from client and send to driver\n")
@@ -207,8 +207,9 @@ func SendGeoJSON(s *Simulation) {
 					Properties: Properties{
 						Type: "Driver",
 						Information: DriverFormat{
-							Id:     v2.Id,
-							Status: v2.Status,
+							Id:          v2.Id,
+							Status:      v2.Status,
+							CurrentTask: v2.CurrentTask.Id,
 						},
 					},
 				}

@@ -65,25 +65,27 @@ func dispatcher(e *Environment) {
 					fmt.Printf("[Dispatcher]No more tasks available for assigning to the %d roaming drivers \n", noOfRoamingDrivers)
 				}
 			} else {
-				fmt.Println("[Dispatcher]No roaming dirvers for allocation.")
+				fmt.Println("[Dispatcher]No roaming drivers avialable for allocation.")
 			}
 
 		}
 	}
 }
+
+// Get k number of tasks ranking by the value.
 func GetValuableTasks(k int, TaskQueue chan Task) []Task {
 	tasks := make([]Task, 0)
 
 K:
-	// Grabs all tasks from the TaskQueue!
+	// Grabs all tasks from the TaskQueue
 	for {
+		// Grab all tasks then break.
 		if len(tasks) == 100 { // TODO: Set toggle max value when choosing list of valuable tasks
 			break
 		}
 		select {
 		case x := <-TaskQueue:
 			fmt.Printf("[GVT]Grab Task %d \n", x.Id)
-			fmt.Printf("Task address @ Grab task: %p \n", &x)
 			tasks = append(tasks, x)
 		default:
 			// if no more tasks in channel, break.
@@ -96,16 +98,16 @@ K:
 		return tasks[i].Value > tasks[j].Value
 	})
 
-	fmt.Printf("[GVT]No of total tasks: %d, with no of roaming drivers: %d\n", len(tasks), k)
+	//fmt.Printf("[GVT]No of total tasks: %d, with no of roaming drivers: %d\n", len(tasks), k)
 	if len(tasks) > k {
 		for i := 0; i < len(tasks[k:]); i++ {
-			fmt.Printf("[GVT]Back to queue: Task %d with value of %d \n", tasks[k:][i].Id, tasks[k:][i].Value)
+			//fmt.Printf("[GVT]Back to queue: Task %d with value of %d \n", tasks[k:][i].Id, tasks[k:][i].Value)
 			TaskQueue <- tasks[k:][i]
 		}
 		return tasks[:k]
 	}
 	for i := 0; i < len(tasks); i++ {
-		fmt.Printf("[GVT] Return task %d for allocation \n", tasks[i].Id)
+		//fmt.Printf("[GVT] Return task %d for allocation \n", tasks[i].Id)
 	}
 	return tasks
 

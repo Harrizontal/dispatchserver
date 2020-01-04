@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"strings"
+
+	"github.com/paulmach/orb"
 )
 
 func stringToArrayInt(s string) []int {
@@ -45,6 +47,28 @@ func latlngToArrayFloat(ll LatLng) []float64 {
 	return s
 }
 
+func latLngToSlice(ll LatLng) []float64 {
+	x := []float64{}
+	x = append(x, ll.Lat)
+	x = append(x, ll.Lng)
+	return x
+}
+
+// TODO: Fix the polygon in array
+func twoLatLngtoArrayFloat(ll []LatLng) [][][]float64 {
+	x := make([][][]float64, 0)
+	z := make([][]float64, 0)
+	for _, latLng := range ll {
+		y := make([]float64, 0)
+		y = append(y, latLng.Lat)
+		y = append(y, latLng.Lng)
+		z = append(z, y)
+	}
+	x = append(x, z)
+	//fmt.Printf("[twoDimen]%v \n", x)
+	return x
+}
+
 func arrayLatLngToString(ll []LatLng) {
 	var str string = "["
 	for k, latLng := range ll {
@@ -63,4 +87,45 @@ func arrayLatLngToString(ll []LatLng) {
 	}
 	str = str + "]"
 	fmt.Println(str)
+}
+
+func structToString(st interface{}) string {
+	out, err := json.Marshal(st)
+	if err != nil {
+		panic(err)
+	}
+
+	return string(out)
+}
+
+func ConvertToLatLng(in []interface{}) LatLng {
+	lat := in[0].(float64)
+	lng := in[1].(float64)
+	return LatLng{Lat: lat, Lng: lng}
+}
+
+func ConvertLngLatToLatLng(in []interface{}) LatLng {
+	return LatLng{Lat: in[1].(float64), Lng: in[0].(float64)}
+}
+
+func ConvertToArrayLatLng(in []interface{}) []LatLng {
+	var s []LatLng
+	for _, value := range in {
+		latlng := ConvertToLatLng(value.([]interface{}))
+		s = append(s, latlng)
+	}
+
+	return s
+}
+
+func ConvertLatLngArrayToPolygon(ll []LatLng) orb.Polygon {
+	poly := make(orb.Polygon, 0)
+	ls := make(orb.LineString, 0)
+	for _, v := range ll {
+		ls = append(ls, orb.Point{v.Lat, v.Lng})
+	}
+
+	ring := orb.Ring(ls)
+	poly = append(poly, ring)
+	return poly
 }

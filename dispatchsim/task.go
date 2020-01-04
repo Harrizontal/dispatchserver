@@ -6,14 +6,17 @@ import (
 )
 
 type Task struct {
-	Id            string
-	StartPosition LatLng    // latlong
-	EndPosition   LatLng    // latlong
-	TaskCreated   time.Time // all time
-	WaitStart     time.Time // all time
-	WaitEnd       time.Time // all time
-	TaskEnded     time.Time // all time
-	Value         int
+	Id              string
+	EnvironmentId   int
+	StartCoordinate LatLng    // Lat lng from dataset
+	EndCoordinate   LatLng    // Lat lng from dataset
+	PickUpLocation  LatLng    // latlong - start of waypoint
+	DropOffLocation LatLng    // latlong - end of waypoint
+	TaskCreated     time.Time // all time
+	WaitStart       time.Time // all time
+	WaitEnd         time.Time // all time
+	TaskEnded       time.Time // all time
+	Value           int
 }
 
 // generate random start position, end position
@@ -30,18 +33,21 @@ type Task struct {
 // 	}
 // }
 
-func CreateTaskFromOrder(o Order) Task {
+func CreateTaskFromOrder(o Order, e *Environment) Task {
 	min := 1
 	max := 10
 	rand.Seed(time.Now().UnixNano())
 	n := min + rand.Intn(max-min+1)
 
 	return Task{
-		Id:            o.Id,
-		StartPosition: LatLng{Lat: o.PickUpLat, Lng: o.PickUpLng},
-		EndPosition:   LatLng{Lat: o.DropOffLat, Lng: o.DropOffLng},
-		TaskCreated:   time.Now(),
-		Value:         n, // random value from 1 to 10 (for now... TODO!)
+		Id:              o.Id,
+		EnvironmentId:   e.Id,
+		StartCoordinate: o.StartCoordinate,
+		EndCoordinate:   o.EndCoordinate,
+		PickUpLocation:  LatLng{Lat: o.PickUpLat, Lng: o.PickUpLng},
+		DropOffLocation: LatLng{Lat: o.DropOffLat, Lng: o.DropOffLng},
+		TaskCreated:     time.Now(),
+		Value:           n, // random value from 1 to 10 (for now... TODO!)
 	}
 }
 

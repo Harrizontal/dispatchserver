@@ -8,14 +8,18 @@ type GeoJSONFormat struct {
 }
 
 type Feature struct {
-	Type       string     `json:"type"`
-	Geometry   Geometry   `json:"geometry"`
-	Properties Properties `json:"properties"`
+	Type       string      `json:"type"`
+	Geometry   interface{} `json:"geometry"`
+	Properties Properties  `json:"properties"`
 }
 
 type Geometry struct {
 	Type        string    `json:"type"`
 	Coordinates []float64 `json:"coordinates"`
+}
+type Geometry2 struct {
+	Type        string        `json:"type"`
+	Coordinates [][][]float64 `json:"coordinates"`
 }
 
 type Properties struct {
@@ -24,13 +28,15 @@ type Properties struct {
 }
 
 type DriverFormat struct {
-	Id          int          `json:"id"`
-	Status      DriverStatus `json:"status"`
-	CurrentTask string       `json:"current_task_id"`
+	Id            int          `json:"id"`
+	EnvironmentId int          `json:"environment_id"`
+	Status        DriverStatus `json:"status"`
+	CurrentTask   string       `json:"current_task_id"`
 }
 
 type TaskFormat struct {
 	Id            string    `json:"id"`
+	EnvironmentId int       `json:"environment_id"`
 	StartPosition []float64 `json:"start_coordinates"`
 	EndPosition   []float64 `json:"end_coordinates"`
 	WaitStart     time.Time `json:"start_wait"`

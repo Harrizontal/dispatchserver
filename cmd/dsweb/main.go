@@ -27,10 +27,9 @@ func wsEndpoint(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		log.Println(err)
 	}
+
 	// helpful log statement to show connections
 	log.Println("Client Connected")
-	//fmt.Printf("Threads: %v \n", runtime.GOMAXPROCS(100))
-	//err = ws.WriteMessage(1, []byte("Hi Client!"))
 
 	if err != nil {
 		log.Println(err)

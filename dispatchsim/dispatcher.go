@@ -8,7 +8,6 @@ import (
 
 // Implement algorithm here
 func dispatcher(e *Environment) {
-	fmt.Println("[Dispatcher]Start Dispatcher")
 	tick := time.Tick(e.S.MasterSpeed * time.Millisecond) // TODO: master timer
 
 	for {
@@ -19,6 +18,7 @@ func dispatcher(e *Environment) {
 
 			noOfRoamingDrivers := 0
 			var roamingDrivers = make([]*DriverAgent, 0)
+			e.DriverAgentMutex.Lock()
 			for _, v := range e.DriverAgents {
 				if v.Status == Roaming {
 					roamingDrivers = append(roamingDrivers, v)
@@ -26,7 +26,7 @@ func dispatcher(e *Environment) {
 					// change roaming to allocating status!! todo!! - for migrating drivers
 				}
 			}
-
+			e.DriverAgentMutex.Unlock()
 			sort.SliceStable(roamingDrivers, func(i, j int) bool {
 				return roamingDrivers[i].GetRankingIndex() > roamingDrivers[j].GetRankingIndex()
 			})
@@ -37,8 +37,9 @@ func dispatcher(e *Environment) {
 				//fmt.Println("[Dispatcher]Start allocation")
 				tasks := GetValuableTasks(noOfRoamingDrivers, e.TaskQueue)
 				if len(tasks) > 0 {
+					fmt.Printf("[Dispatcher %d]Assigning task(s) to roaming driver(s) \n", e.Id)
 					for i := 0; i < len(tasks); i++ {
-						fmt.Printf("[Dispatcher]Task %d with value of %d is to be allocated \n", tasks[i].Id, tasks[i].Value)
+						//fmt.Printf("[Dispatcher]Task %d with value of %d is to be allocated \n", tasks[i].Id, tasks[i].Value)
 					}
 
 					// Sort drivers' Driver Ranking Index in descending order!
@@ -47,25 +48,25 @@ func dispatcher(e *Environment) {
 					})
 
 					// for printing - can delete!
-					for i := 0; i < len(roamingDrivers); i++ {
-						fmt.Printf("[Dispatcher]Roaming Driver %d with movtivation %f, reputation %f , fatigue %f and regret %f. Ranking Index: %f\n",
-							roamingDrivers[i].Id,
-							roamingDrivers[i].Motivation,
-							roamingDrivers[i].Reputation,
-							roamingDrivers[i].Fatigue,
-							roamingDrivers[i].Regret,
-							roamingDrivers[i].GetRankingIndex())
-					}
+					// for i := 0; i < len(roamingDrivers); i++ {
+					// 	fmt.Printf("[Dispatcher]Roaming Driver %d with movtivation %f, reputation %f , fatigue %f and regret %f. Ranking Index: %f\n",
+					// 		roamingDrivers[i].Id,
+					// 		roamingDrivers[i].Motivation,
+					// 		roamingDrivers[i].Reputation,
+					// 		roamingDrivers[i].Fatigue,
+					// 		roamingDrivers[i].Regret,
+					// 		roamingDrivers[i].GetRankingIndex())
+					// }
 
 					// assigning task to driver
 					for i := 0; i < len(tasks); i++ {
 						roamingDrivers[i].Request <- Message{Task: tasks[i]}
 					}
 				} else {
-					fmt.Printf("[Dispatcher]No more tasks available for assigning to the %d roaming drivers \n", noOfRoamingDrivers)
+					fmt.Printf("[Dispatcher %d]No tasks available for assigning to the %d roaming drivers \n", e.Id, noOfRoamingDrivers)
 				}
 			} else {
-				fmt.Println("[Dispatcher]No roaming drivers avialable for allocation.")
+				fmt.Printf("[Dispatcher %d]No roaming drivers avialable for allocation.\n", e.Id)
 			}
 
 		}

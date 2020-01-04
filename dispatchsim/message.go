@@ -23,18 +23,18 @@ type LatLng struct {
 	Lng float64
 }
 
-func ConvertToLatLng(in []interface{}) LatLng {
-	lat := in[0].(float64)
-	lng := in[1].(float64)
-	return LatLng{Lat: lat, Lng: lng}
+type RecieveFormat struct {
+	Command       int
+	CommandSecond int
+	Data          interface{}
 }
 
-func ConvertToArrayLatLng(in []interface{}) []LatLng {
-	var s []LatLng
-	for _, value := range in {
-		latlng := ConvertToLatLng(value.([]interface{}))
-		s = append(s, latlng)
-	}
+type CorrectedLocation struct {
+	StartCoordinate LatLng
+	EndCoordinate   LatLng
+}
 
-	return s
+type LngLat struct {
+	Lng float64
+	Lat float64
 }

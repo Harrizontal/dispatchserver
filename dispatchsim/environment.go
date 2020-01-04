@@ -2,82 +2,82 @@ package dispatchsim
 
 import (
 	"fmt"
-	"log"
 	"math"
 	"sync"
 	"time"
+
+	"github.com/paulmach/orb"
+	"github.com/paulmach/orb/planar"
 )
 
 type Environment struct {
-	S                    *Simulation
-	Id                   int
-	Polygon              []LatLng
-	DriverAgents         map[int]*DriverAgent
-	NoOfIntialDrivers    int
-	IncomingDriversQueue chan DriverAgent // TODO: for migrating drivers
-	Tasks                map[string]*Task // store all tasks
-	TaskQueue            chan Task
-	FinishQueue          chan Task
-	TotalTasks           int
-	MasterSpeed          time.Duration
-	Quit                 chan struct{}
-	WaitGroup            *sync.WaitGroup // for ending simulation
+	S                 *Simulation
+	Id                int
+	Polygon           orb.Polygon
+	PolygonLatLng     []LatLng
+	DriverAgents      map[int]*DriverAgent
+	DriverAgentMutex  sync.RWMutex
+	NoOfIntialDrivers int
+	Tasks             map[string]*Task // store all tasks
+	TaskQueue         chan Task
+	FinishQueue       chan Task
+	TotalTasks        int
+	MasterSpeed       time.Duration
+	Quit              chan struct{}
+	WaitGroup         *sync.WaitGroup // for ending simulation
 }
 
-func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bool, generateTasks bool) Environment {
+func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bool, generateTasks bool, p []LatLng) Environment {
 	return Environment{
-		S:                    s,
-		Id:                   id,
-		Polygon:              make([]LatLng, 0),
-		DriverAgents:         make(map[int]*DriverAgent),
-		NoOfIntialDrivers:    noOfDrivers,
-		IncomingDriversQueue: make(chan DriverAgent, 1000),
-		Tasks:                make(map[string]*Task), // id -> task
-		TaskQueue:            make(chan Task, 10000),
-		FinishQueue:          make(chan Task, 10000),
-		TotalTasks:           0,
-		MasterSpeed:          100,
-		Quit:                 make(chan struct{}), // for stopping dispatcher and drivers
+		S:                 s,
+		Id:                id,
+		Polygon:           ConvertLatLngArrayToPolygon(p),
+		PolygonLatLng:     p,
+		DriverAgents:      make(map[int]*DriverAgent),
+		DriverAgentMutex:  sync.RWMutex{},
+		NoOfIntialDrivers: noOfDrivers,
+		Tasks:             make(map[string]*Task), // id -> task
+		TaskQueue:         make(chan Task, 10000),
+		FinishQueue:       make(chan Task, 10000),
+		TotalTasks:        0,
+		MasterSpeed:       100,
+		Quit:              make(chan struct{}), // for stopping dispatcher and drivers
 	}
 }
 
 // generate tasks
 func (e *Environment) GiveTask(o Order) {
-	task := CreateTaskFromOrder(o)
+	task := CreateTaskFromOrder(o, e)
 	fmt.Printf("[Environment %d]New Task Generated! - Task %v \n", e.Id, task.Id)
 	e.TaskQueue <- task
 	e.Tasks[task.Id] = &task
-	fmt.Printf("Task address @ givetask function: %p \n", &task)
 }
 
 // generate new drivers
 //TODO: how to get last index no...?
-func (e *Environment) GenerateDriver(name string, id int) {
-	//e.DriverAgents = append(e.DriverAgents, CreateDriver(id, e))
-	if _, ok := e.DriverAgents[id]; !ok {
-		driver := CreateDriver(id, e)
-		e.DriverAgents[id] = &driver
-	} else {
-		log.Fatal("Driver exists!")
-	}
+// func (e *Environment) GenerateDriver(name string, id int) {
+// 	//e.DriverAgents = append(e.DriverAgents, CreateDriver(id, e))
+// 	if _, ok := e.DriverAgents[id]; !ok {
+// 		driver := CreateDriver(id, e)
+// 		e.DriverAgents[id] = &driver
+// 	} else {
+// 		log.Fatal("Driver exists!")
+// 	}
 
-}
+// }
 
-func (e *Environment) Run(startingDriverId int) {
-	// for i := 0; i < len(e.DriverAgents); i++ {
-	// 	e.DriverAgents[i] = CreateDriver(startingDriverId, e)
-	// 	go e.DriverAgents[i].ProcessTask()
+func (e *Environment) Run() {
+
+	// for i := 0; i < e.NoOfIntialDrivers; i++ {
+	// 	driver := CreateDriver(startingDriverId, e)
+	// 	e.DriverAgents[startingDriverId] = &driver
+	// 	go e.DriverAgents[startingDriverId].ProcessTask2()
 	// 	startingDriverId++
 	// }
 
-	for i := 0; i < e.NoOfIntialDrivers; i++ {
-		driver := CreateDriver(startingDriverId, e)
-		e.DriverAgents[startingDriverId] = &driver
-		go e.DriverAgents[startingDriverId].ProcessTask2()
-		startingDriverId++
-	}
-
 	go dispatcher(e)
+
+	//TODO: support adding drivers, migrating drivers
 
 	// condition to end simulation
 	// 	var countTask int = 0
@@ -149,4 +149,15 @@ func (e *Environment) ComputeAverageValue(reputation float64) float64 {
 		return 0
 	}
 	return averageTaskValue
+}
+
+func isPointInside(p orb.Polygon, point orb.Point) bool {
+	// for _, v := range s.Environments {
+	if planar.PolygonContains(p, point) {
+		//fmt.Printf("[isPointInsidePolygon]Point inside in Environment!\n")
+		return true
+	} else {
+		//fmt.Printf("[isPointInsidePolygon]Point not inside in Environment\n")
+		return false
+	}
 }

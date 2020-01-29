@@ -32,6 +32,7 @@ type RecieveFormat struct {
 type CorrectedLocation struct {
 	StartCoordinate LatLng
 	EndCoordinate   LatLng
+	Distance        float64 // distance between the StartCoordinate and EndCoordinate
 }
 
 type LngLat struct {

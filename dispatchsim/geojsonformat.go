@@ -42,4 +42,6 @@ type TaskFormat struct {
 	WaitStart     time.Time `json:"start_wait"`
 	WaitEnd       time.Time `json:"end_wait"`
 	TaskEnd       time.Time `json:"task_end"`
+	Value         float64   `json:"value"`
+	Distance      float64   `json:"distance"`
 }

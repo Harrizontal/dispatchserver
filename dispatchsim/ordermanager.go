@@ -6,7 +6,9 @@ import (
 	"io"
 	"log"
 	"os"
+	"sort"
 	"strconv"
+	"time"
 
 	"github.com/paulmach/orb"
 )
@@ -21,40 +23,43 @@ type Order struct {
 	DropOffLat      float64
 	StartCoordinate LatLng
 	EndCoordinate   LatLng
+	Distance        float64
 }
 
 // there is one and only one order retrieve in the simulation.
 type OrderManager struct {
-	S          *Simulation
-	OrderQueue chan Order
-	Recieve    chan RecieveFormat
+	S             *Simulation
+	OrderQueue    chan Order
+	Recieve       chan RecieveFormat
+	UpdatedOrders []Order
 }
 
 func SetupOrderRetrieve(s *Simulation) OrderManager {
 	return OrderManager{
-		S:          s,
-		OrderQueue: make(chan Order, 5000),
-		Recieve:    make(chan RecieveFormat),
+		S:             s,
+		OrderQueue:    make(chan Order, 5000),
+		Recieve:       make(chan RecieveFormat),
+		UpdatedOrders: make([]Order, 0),
 	}
 }
 
 func (om *OrderManager) runOrderRetrieve() {
-	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/singaporeorder.csv")
+	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/didi1.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	reader := csv.NewReader(csvFile)
-	var order []Order
+	var orders []Order
 	for {
 		line, error := reader.Read()
 		if error == io.EOF {
 			break
 		} else if error != nil {
-			fmt.Printf("asdasd\n")
+			fmt.Printf("Error in reading file. \n")
 			log.Fatal(error)
 		}
-		order = append(order, Order{
+		orders = append(orders, Order{
 			Id:            line[0],
 			RideStartTime: line[1],
 			RideStopTime:  line[2],
@@ -65,71 +70,108 @@ func (om *OrderManager) runOrderRetrieve() {
 		})
 	}
 
-	for i := 0; i < len(order); i++ {
-		fmt.Printf("[OrderRetriever]Order %v\n", order[i].Id)
-		om.S.OrderQueue <- order[i]
-	}
-}
+	// sort the orders' timestamp in increasing order (oldest will be at the top)
+	sort.SliceStable(orders, func(i, j int) bool {
+		return orders[i].RideStartTime < orders[j].RideStartTime
+	})
 
-func (om *OrderManager) runOrderDistribute() {
-	tasksGiven := false
-	for {
+	for i := 0; i < len(orders); i++ {
+		fmt.Printf("[OrderRetriever]Order %v, Time: %v\n", orders[i].Id, orders[i].RideStartTime)
+		o := SendFormat{3, 1, OrderInfoFormat{1, []float64{orders[i].PickUpLng, orders[i].PickUpLat}, []float64{orders[i].DropOffLng, orders[i].DropOffLat}}}
+		om.S.Send <- structToString(o)
 		select {
-		case order := <-om.S.OrderQueue:
-			// get the start coordinate and end coordinate for routing of the order even though is provided.
-			if (order.StartCoordinate == LatLng{} && order.EndCoordinate == LatLng{}) {
-				o := SendFormat{3, 1, OrderInfoFormat{1, []float64{order.PickUpLng, order.PickUpLat}, []float64{order.DropOffLng, order.DropOffLat}}}
-				fmt.Printf("[Send] %v\n", order)
-				om.S.Send <- structToString(o)
-				select {
-				case r := <-om.Recieve:
-					fmt.Printf("Recieve new location %v\n", r.Data.(CorrectedLocation))
-					order.StartCoordinate = r.Data.(CorrectedLocation).StartCoordinate
-					order.EndCoordinate = r.Data.(CorrectedLocation).EndCoordinate
-				}
-			}
-			// start distribution of the order
-			if len(om.S.Environments) > 0 {
-			K:
-				for _, v := range om.S.Environments {
+		case r := <-om.Recieve:
+			//fmt.Printf("Recieve new location %v\n", r.Data.(CorrectedLocation))
+			sc := r.Data.(CorrectedLocation).StartCoordinate
+			ec := r.Data.(CorrectedLocation).EndCoordinate
+			distance := r.Data.(CorrectedLocation).Distance
 
-					if isPointInside(v.Polygon, orb.Point{order.StartCoordinate.Lng, order.StartCoordinate.Lat}) {
-						fmt.Printf("[OrderDistributor]Allocating Task %v to Environment %d\n", order.Id, v.Id)
-						v.TotalTasks = v.TotalTasks + 1 // increment totaltasks
-						v.GiveTask(order)
-						tasksGiven = true
-						break K
-					}
-				}
-				// no environment is able to take in this order
-				if !tasksGiven {
-					om.S.OrderQueue <- order // put back to order queue
-					tasksGiven = false
-				}
+			if (sc == LatLng{} && ec == LatLng{}) {
+				fmt.Printf("[OrderRetriever]No waypoint available for this order %v\n", orders[i].Id)
 			} else {
-				// no environment available - put back to order queue
-				om.S.OrderQueue <- order
+				orders[i].StartCoordinate = sc
+				orders[i].EndCoordinate = ec
+				orders[i].Distance = distance
+				om.UpdatedOrders = append(om.UpdatedOrders, orders[i])
 			}
-		default:
-			//fmt.Printf("Simulation: %d \n", len(s.Environments))
 		}
 
+		//om.S.OrderQueue <- orders[i]
 	}
-	//fmt.Println("[OrderDispatcher] Stop")
 }
 
-func (om *OrderManager) getCoord() {
-	// lat lng format... should change to lng lat soon
-	o := SendFormat{3, 1, OrderInfoFormat{1, []float64{103.8468822, 1.2783807}, []float64{103.846895, 1.2770392}}}
-	om.S.Send <- structToString(o)
-	select {
-	case <-om.Recieve:
-		fmt.Printf("Recieve new location\n")
+func (om *OrderManager) runOrderDistributer2() {
+	time.Sleep(5 * time.Second)
+	for _, v := range om.UpdatedOrders {
+		fmt.Printf("[OrderDistributor]Order found - Id:%v\n", v.Id)
+		go om.sendOrderToEnvironment(v)
 	}
-	fmt.Printf("End new location\n")
+
+}
+
+func (om *OrderManager) runOrderDistributer() {
+	fmt.Printf("[OrderDistributor]Start Order Distributer\n")
+	for range om.S.Ticker {
+		//fmt.Printf("[OrderDistributor]Time:%v\n", om.S.SimulationTime)
+		currentTime := om.S.SimulationTime
+		if len(om.UpdatedOrders) > 0 {
+			//fmt.Printf("[OrderDistributor]No of orders left in the timeline:%v\n", len(om.UpdatedOrders))
+			sameOrderCount := 0
+			for _, v := range om.UpdatedOrders {
+				orderTime := ConvertUnixToTimeStamp(v.RideStartTime) // we use RideStartTime as the start of order
+				if (currentTime.Hour() == orderTime.Hour()) && (currentTime.Minute() == orderTime.Minute()) {
+					//fmt.Printf("[OrderDistributor]Order found - Id:%v, Time:%v\n", v.Id, orderTime)
+					go om.sendOrderToEnvironment(v)
+					sameOrderCount++
+				}
+			}
+
+			if sameOrderCount > 0 {
+				om.UpdatedOrders = om.UpdatedOrders[sameOrderCount:]
+			}
+
+			//fmt.Printf("[OrderDistributor] %v \n", om.UpdatedOrders[0].RideStartTime)
+		}
+	}
+}
+
+//Order will get "lost" when there is no environment fit for the Order or no environment in the simulation at all
+func (om *OrderManager) sendOrderToEnvironment(o Order) {
+	tasksGiven := false
+	if len(om.S.Environments) > 0 {
+	K:
+		for _, v := range om.S.Environments {
+
+			if isPointInside(v.Polygon, orb.Point{o.StartCoordinate.Lng, o.StartCoordinate.Lat}) {
+				fmt.Printf("[SendOrderToEnv]Allocating Task %v to Environment %d\n", o.Id, v.Id)
+				v.TotalTasks = v.TotalTasks + 1 // increment totaltasks
+				v.GiveTask(o)
+				tasksGiven = true
+				break K
+			}
+		}
+		// no environment is able to take in this order
+		if !tasksGiven {
+			// order will get lost.
+			fmt.Printf("[SendOrderToEnv]No available environment to take order %v %d\n", o.Id)
+			tasksGiven = false
+		}
+	} else {
+		fmt.Printf("[SendOrderToEnv]No environment created to take order %v\n", o.Id)
+	}
 }
 
 func ParseFloatResult(f string) float64 {
 	s, _ := strconv.ParseFloat(f, 64)
 	return s
+}
+
+func ConvertUnixToTimeStamp(x string) time.Time {
+	i, err := strconv.ParseInt(x, 10, 64)
+	if err != nil {
+		panic(err)
+	}
+	tm := time.Unix(i, 0)
+	//fmt.Println(tm)
+	return tm
 }

@@ -1,7 +1,7 @@
 package dispatchsim
 
 import (
-	"math/rand"
+	"math"
 	"time"
 )
 
@@ -17,6 +17,8 @@ type Task struct {
 	WaitEnd         time.Time // all time
 	TaskEnded       time.Time // all time
 	Value           int
+	FinalValue      float64
+	Distance        float64
 }
 
 // generate random start position, end position
@@ -34,10 +36,14 @@ type Task struct {
 // }
 
 func CreateTaskFromOrder(o Order, e *Environment) Task {
-	min := 1
-	max := 10
-	rand.Seed(time.Now().UnixNano())
-	n := min + rand.Intn(max-min+1)
+	// min := 1
+	// max := 10
+	// rand.Seed(time.Now().UnixNano())
+	// n := min + rand.Intn(max-min+1)
+	// fmt.Printf("o.Distance: %v\n", o.Distance)
+	// fmt.Printf("S.RatePerKM: %v\n", e.S.RatePerKM)
+	// fmt.Printf("o.Distance*e.S.RatePerKM: %v\n", o.Distance*e.S.RatePerKM)
+	// fmt.Printf("value: %v\n", math.Round(float64(o.Distance*e.S.RatePerKM)*100)/100)
 
 	return Task{
 		Id:              o.Id,
@@ -47,11 +53,13 @@ func CreateTaskFromOrder(o Order, e *Environment) Task {
 		PickUpLocation:  LatLng{Lat: o.PickUpLat, Lng: o.PickUpLng},
 		DropOffLocation: LatLng{Lat: o.DropOffLat, Lng: o.DropOffLng},
 		TaskCreated:     time.Now(),
-		Value:           n, // random value from 1 to 10 (for now... TODO!)
+		Value:           int(o.Distance), // random value from 1 to 10 (for now... TODO!)
+		FinalValue:      math.Round(float64(o.Distance*e.S.RatePerKM)*100) / 100,
+		Distance:        o.Distance,
 	}
 }
 
-// generate rating from 0 to 5
+// TODO: generate rating from 0 to 5
 func (t *Task) ComputeRating() float64 {
 	// gives rating
 	return 5

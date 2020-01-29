@@ -99,9 +99,14 @@ func structToString(st interface{}) string {
 }
 
 func ConvertToLatLng(in []interface{}) LatLng {
-	lat := in[0].(float64)
-	lng := in[1].(float64)
-	return LatLng{Lat: lat, Lng: lng}
+	if len(in) == 2 {
+		lat := in[0].(float64)
+		lng := in[1].(float64)
+		return LatLng{Lat: lat, Lng: lng}
+	} else {
+		return LatLng{}
+	}
+
 }
 
 func ConvertLngLatToLatLng(in []interface{}) LatLng {

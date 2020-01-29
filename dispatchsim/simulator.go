@@ -3,34 +3,51 @@ package dispatchsim
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 )
 
 type Simulation struct {
-	Environments     map[int]*Environment
-	DriverAgents     map[int]*DriverAgent
-	DriverAgentMutex sync.RWMutex
-	OM               *OrderManager
-	MasterSpeed      time.Duration
-	Recieve          chan string // recieve from websocket
-	Send             chan string // send to websocket
-	OrderQueue       chan Order
-	UpdateMap        bool
-	UpdateMapSpeed   time.Duration
+	isRunning               bool
+	Environments            map[int]*Environment
+	DriverAgents            map[int]*DriverAgent
+	DriverAgentMutex        sync.RWMutex
+	OM                      *OrderManager
+	MasterSpeed             time.Duration
+	Recieve                 chan string // recieve from websocket
+	Send                    chan string // send to websocket
+	OrderQueue              chan Order
+	UpdateMap               bool          // settings
+	UpdateMapSpeed          time.Duration // settings
+	OrderDistributeInterval time.Duration // every x, distribute {OrderDistributeAmount} to all environment (not each)
+	OrderDistributeAmount   int
+	DispatcherSpeed         time.Duration
+	UpdateStatsSpeed        time.Duration
+	Ticker                  <-chan time.Time
+	SimulationTime          time.Time
+	RatePerKM               float64
 }
 
 func SetupSimulation() Simulation {
 	return Simulation{
-		Environments:     make(map[int]*Environment),
-		DriverAgents:     make(map[int]*DriverAgent),
-		DriverAgentMutex: sync.RWMutex{},
-		MasterSpeed:      200,
-		Recieve:          make(chan string, 10000),
-		Send:             make(chan string, 10000),
-		OrderQueue:       make(chan Order, 1000),
-		UpdateMap:        true, // set true to update mapbox
-		UpdateMapSpeed:   1000, // update speed to mapbox
+		isRunning:               false,
+		Environments:            make(map[int]*Environment),
+		DriverAgents:            make(map[int]*DriverAgent),
+		DriverAgentMutex:        sync.RWMutex{},
+		MasterSpeed:             200,
+		Recieve:                 make(chan string, 10000),
+		Send:                    make(chan string, 10000),
+		OrderQueue:              make(chan Order, 1000),
+		UpdateMap:               true, // set true to update mapbox
+		UpdateMapSpeed:          100,  // update speed to mapbox
+		OrderDistributeInterval: 5000,
+		OrderDistributeAmount:   2,
+		DispatcherSpeed:         5000,
+		UpdateStatsSpeed:        1000,
+		Ticker:                  time.Tick(50 * time.Millisecond),                 // TODO: Make adjustable
+		SimulationTime:          time.Date(2020, 1, 23, 00, 30, 0, 0, time.Local), // TODO: Make adjustable
+		RatePerKM:               1,
 	}
 }
 
@@ -39,35 +56,67 @@ func (s *Simulation) Run() {
 	var noOfDrivers = 0
 	var startingDriverCount = 1 // starting id of driver
 
-	//var k = false
-	tick := time.Tick((s.UpdateMapSpeed) * time.Millisecond)
+	var k = false
+
+	go s.sendMapData()
+	go s.sendStats()
+
 	for {
 		select {
 		case recieveCommand := <-s.Recieve:
 			command := stringToArrayString(recieveCommand)
 			fmt.Printf("[Sim]%v\n", recieveCommand)
+
+			// testing
+			// var data json.RawMessage
+			// recieveFormat := RecieveFormat2{
+			// 	Data: &data,
+			// }
+
+			// if err := json.Unmarshal([]byte(recieveCommand), &recieveFormat); err != nil {
+			// 	log.Fatal(err)
+			// }
+			// fmt.Printf("SecondCommand:%v\n", recieveFormat.SecondCommand)
+
+			// switch recieveFormat.SecondCommand {
+			// case 0:
+			// case 1:
+			// 	//settingsFormat := &SettingsFormat{}
+			// 	var sf SettingsFormat
+			// 	if err := json.Unmarshal(data, &sf); err != nil {
+			// 		log.Fatal(err)
+			// 	}
+			// 	fmt.Printf("asd: %v \n", sf.TaskValueType)
+			// }
+			// end of testing
+
 			commandType := command.([]interface{})[0].(float64)
 			switch commandType {
 			case 0: // pause
-
-			K:
-				for {
-					select {
-					case recieveCommand := <-s.Recieve:
-						command := stringToArrayString(recieveCommand)
-						commandType := command.([]interface{})[0].(float64)
-						//fmt.Printf("[Simulator]Receive %v \n", command)
-						switch commandType {
-						case 0:
-							fmt.Printf("[Simulator]Play\n")
-							break K
+				commandTypeLevelTwo := command.([]interface{})[1].(float64)
+				switch commandTypeLevelTwo {
+				case 0:
+				K:
+					for {
+						select {
+						case recieveCommand := <-s.Recieve:
+							command := stringToArrayString(recieveCommand)
+							commandType := command.([]interface{})[0].(float64)
+							//fmt.Printf("[Simulator]Receive %v \n", command)
+							switch commandType {
+							case 0:
+								fmt.Printf("[Simulator]Play\n")
+								break K
+							default:
+								//fmt.Printf("[Simulator]Recieve something when pause %v\n", commandType)
+								s.Recieve <- recieveCommand
+							}
 						default:
-							//fmt.Printf("[Simulator]Recieve something when pause %v\n", commandType)
-							s.Recieve <- recieveCommand
+							//fmt.Printf("[Simulator]On Pause\n")
 						}
-					default:
-						//fmt.Printf("[Simulator]On Pause\n")
 					}
+				case 1: // settings
+					fmt.Printf("%v", command)
 				}
 
 				fmt.Printf("[Simulator]End of case 0\n")
@@ -107,47 +156,98 @@ func (s *Simulation) Run() {
 				commandTypeLevelTwo := command.([]interface{})[1].(float64)
 				switch commandTypeLevelTwo {
 				case 0:
-					om := SetupOrderRetrieve(s)
-					s.OM = &om
-					go om.runOrderRetrieve()
-					go om.runOrderDistribute()
+					fmt.Printf("accessing 3,0\n")
+					// om := SetupOrderRetrieve(s)
+					// s.OM = &om
+					// go s.StartTimer()
+					// go om.runOrderRetrieve()
+					// go om.runOrderDistributer()
 
-					// if len(s.Environments) > 0 && k == false {
-					// 	k = true
-					// 	om := SetupOrderRetrieve(s)
-					// 	s.OM = &om
-					// 	go om.runOrderRetrieve()
-					// 	go om.runOrderDistribute()
-					// } else {
-					// 	s.Send <- "[Simulator]Cannot intailize order distributor"
-					// }
+					if len(s.Environments) > 0 && k == false {
+						k = true
+						om := SetupOrderRetrieve(s)
+						s.OM = &om
+						go s.StartTimer()
+						go om.runOrderRetrieve()
+						go om.runOrderDistributer()
+					} else {
+						s.Send <- "[Simulator]Cannot intailize order distributor"
+					}
 				case 1: // pickup lnglat and drop off lnglat in terms of waypoint
 					fmt.Printf("accessing 3,1\n")
 					sendCorrectedLocation(command, s)
 				case 2:
-					om := SetupOrderRetrieve(s)
-					s.OM = &om
-					go s.OM.getCoord()
+
+					// initializing order retriever, and order distributor
+
 				}
-				// initializing order retriever, and order distributor
-
 			}
-		}
-
-		// Send GEOJSON every X miliseconds
-		select {
-		case <-tick:
-			if s.UpdateMap {
-				SendGeoJSON2(s)
-			}
-		default:
-
 		}
 	}
 	fmt.Println("[Simulation]Ended")
 }
 
+func (s *Simulation) sendMapData() {
+	fmt.Printf("[Simulator]sendMapData started \n")
+	tick := time.Tick((s.UpdateMapSpeed) * time.Millisecond)
+	for {
+		select {
+		case <-tick:
+			//fmt.Printf("[Simulator]Sending map data\n")
+			if s.UpdateMap && s.isRunning { // send updates when there is Driver Agent available and environment placed
+				SendGeoJSON(s)
+				SendEnvGeoJSON(s)
+				SendTaskGeoJSON(s)
+			}
+		default:
+
+		}
+	}
+}
+
+func (s *Simulation) sendStats() {
+	fmt.Printf("[Simulator]sendStats started \n")
+	tick := time.Tick((s.UpdateStatsSpeed) * time.Millisecond)
+	for {
+		select {
+		case <-tick:
+			if s.isRunning {
+				SendDriverStats(s)
+			}
+		default:
+		}
+	}
+}
+
+// func (s *Simulation) Run2() {
+// 	SendTimer(s)
+// }
+
+func (s *Simulation) ComputeAverageValue(reputation float64) float64 {
+	var accumulatedTaskValue float64 = 0
+	var totalDriversWithTask = 0
+
+	for _, v := range s.DriverAgents {
+		if v.CurrentTask.Id != "null" && v.Status != Roaming {
+			fmt.Printf("[ComputeAverageValue] Driver %d has Task %v with value of %d \n",
+				v.Id,
+				v.CurrentTask.Id,
+				v.CurrentTask.FinalValue,
+			)
+			accumulatedTaskValue = v.CurrentTask.FinalValue + accumulatedTaskValue
+			totalDriversWithTask++
+		}
+	}
+	averageTaskValue := float64(accumulatedTaskValue) / float64(totalDriversWithTask)
+
+	if math.IsNaN(averageTaskValue) {
+		return 0
+	}
+	return averageTaskValue
+}
+
 // e.g 2,0,{environmentId},{DriverId}
+// THIS METHOD IS UNUSED
 func sendRandomPointDriver(command interface{}, s *Simulation, eId int, dId int) {
 	latLng := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
 	s.Environments[eId].DriverAgents[dId].Recieve <- Message{CommandType: 2, CommandSecondType: 0, LatLng: latLng}
@@ -228,8 +328,9 @@ func sendRandomDestinationWaypoint(command interface{}, s *Simulation, eId int, 
 }
 
 func sendCorrectedLocation(command interface{}, s *Simulation) {
-	pickupLocation := ConvertLngLatToLatLng(command.([]interface{})[2].([]interface{}))
-	dropoffLocation := ConvertLngLatToLatLng(command.([]interface{})[3].([]interface{}))
+	pickupLocation := ConvertToLatLng(command.([]interface{})[2].([]interface{}))
+	dropoffLocation := ConvertToLatLng(command.([]interface{})[3].([]interface{}))
+	distance := command.([]interface{})[4].(float64)
 
 	r := RecieveFormat{
 		Command:       3,
@@ -237,89 +338,14 @@ func sendCorrectedLocation(command interface{}, s *Simulation) {
 		Data: CorrectedLocation{
 			StartCoordinate: pickupLocation,
 			EndCoordinate:   dropoffLocation,
+			Distance:        distance,
 		},
 	}
 
 	s.OM.Recieve <- r
 }
 
-func SendGeoJSON(s *Simulation) {
-	if len(s.Environments) > 0 {
-		geojson := &GeoJSONFormat{
-			Type:     "FeatureCollection",
-			Features: make([]Feature, 0),
-		}
-		for _, v := range s.Environments {
-			//TODO: Separate polygon into another sendgeojson function
-			feature := Feature{
-				Type: "Feature",
-				Geometry: Geometry2{
-					Type:        "Polygon",
-					Coordinates: twoLatLngtoArrayFloat(v.PolygonLatLng),
-				},
-				Properties: Properties{},
-			}
-			geojson.Features = append(geojson.Features, feature)
-			// add drivers to geojson
-			for _, v2 := range v.DriverAgents {
-				//fmt.Printf("[Simulator] Driver %d\n", v2.Id)
-				feature := Feature{
-					Type: "Feature",
-					Geometry: Geometry{
-						Type:        "Point",
-						Coordinates: latlngToArrayFloat(v2.CurrentLocation),
-					},
-					Properties: Properties{
-						Type: "Driver",
-						Information: DriverFormat{
-							Id:            v2.Id,
-							EnvironmentId: v2.E.Id,
-							Status:        v2.Status,
-							CurrentTask:   v2.CurrentTask.Id,
-						},
-					},
-				}
-				geojson.Features = append(geojson.Features, feature)
-			}
-			// add tasks to geojson
-			for _, v3 := range v.Tasks {
-				if (v3.TaskEnded == time.Time{}) {
-					feature := Feature{
-						Type: "Feature",
-						Geometry: Geometry{
-							Type:        "Point",
-							Coordinates: latlngToArrayFloat(v3.PickUpLocation),
-						},
-						Properties: Properties{
-							Type: "Task",
-							Information: TaskFormat{
-								Id:            v3.Id,
-								EnvironmentId: v3.EnvironmentId,
-								StartPosition: latlngToArrayFloat(v3.PickUpLocation),
-								EndPosition:   latlngToArrayFloat(v3.DropOffLocation),
-								WaitStart:     v3.WaitStart,
-								WaitEnd:       v3.WaitEnd,
-								TaskEnd:       v3.TaskEnded,
-							},
-						},
-					}
-					geojson.Features = append(geojson.Features, feature)
-				}
-
-			}
-		}
-
-		e, err := json.Marshal(geojson)
-		if err != nil {
-			fmt.Println(err)
-		}
-		s.Send <- string(e)
-	}
-
-}
-
-func SendGeoJSON2(s *Simulation) {
-
+func SendEnvGeoJSON(s *Simulation) {
 	geojson := &GeoJSONFormat{
 		Type:     "FeatureCollection",
 		Features: make([]Feature, 0),
@@ -336,33 +362,26 @@ func SendGeoJSON2(s *Simulation) {
 			Properties: Properties{},
 		}
 		geojson.Features = append(geojson.Features, feature)
+	}
 
-		// add tasks to geojson
-		for _, v3 := range v.Tasks {
-			if (v3.TaskEnded == time.Time{}) {
-				feature := Feature{
-					Type: "Feature",
-					Geometry: Geometry{
-						Type:        "Point",
-						Coordinates: latlngToArrayFloat(v3.PickUpLocation),
-					},
-					Properties: Properties{
-						Type: "Task",
-						Information: TaskFormat{
-							Id:            v3.Id,
-							EnvironmentId: v3.EnvironmentId,
-							StartPosition: latlngToArrayFloat(v3.PickUpLocation),
-							EndPosition:   latlngToArrayFloat(v3.DropOffLocation),
-							WaitStart:     v3.WaitStart,
-							WaitEnd:       v3.WaitEnd,
-							TaskEnd:       v3.TaskEnded,
-						},
-					},
-				}
-				geojson.Features = append(geojson.Features, feature)
-			}
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 0,
+		Data:          geojson,
+	}
 
-		}
+	e, err := json.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s.Send <- string(e)
+}
+
+func SendGeoJSON(s *Simulation) {
+
+	geojson := &GeoJSONFormat{
+		Type:     "FeatureCollection",
+		Features: make([]Feature, 0),
 	}
 
 	for _, v := range s.DriverAgents {
@@ -385,10 +404,109 @@ func SendGeoJSON2(s *Simulation) {
 		geojson.Features = append(geojson.Features, feature)
 	}
 
-	e, err := json.Marshal(geojson)
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 1,
+		Data:          geojson,
+	}
+
+	e, err := json.Marshal(sendformat)
 	if err != nil {
 		fmt.Println(err)
 	}
 	s.Send <- string(e)
 
+}
+
+func SendTaskGeoJSON(s *Simulation) {
+	geojson := &GeoJSONFormat{
+		Type:     "FeatureCollection",
+		Features: make([]Feature, 0),
+	}
+
+	for _, v := range s.Environments {
+		v.TaskMutex.Lock()
+		for _, v2 := range v.Tasks {
+			if (v2.WaitEnd == time.Time{}) {
+				feature := Feature{
+					Type: "Feature",
+					Geometry: Geometry{
+						Type:        "Point",
+						Coordinates: latlngToArrayFloat(v2.PickUpLocation),
+					},
+					Properties: Properties{
+						Type: "Task",
+						Information: TaskFormat{
+							Id:            v2.Id,
+							EnvironmentId: v2.EnvironmentId,
+							StartPosition: latlngToArrayFloat(v2.PickUpLocation),
+							EndPosition:   latlngToArrayFloat(v2.DropOffLocation),
+							WaitStart:     v2.WaitStart,
+							WaitEnd:       v2.WaitEnd,
+							TaskEnd:       v2.TaskEnded,
+							Value:         v2.FinalValue,
+							Distance:      v2.Distance,
+						},
+					},
+				}
+				geojson.Features = append(geojson.Features, feature)
+			}
+
+		}
+		v.TaskMutex.Unlock()
+	}
+
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 2,
+		Data:          geojson,
+	}
+
+	e, err := json.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s.Send <- string(e)
+}
+
+func SendDriverStats(s *Simulation) {
+	count := 0
+	count2 := 0
+	count3 := 0
+	for _, v := range s.DriverAgents {
+		if v.Status == Roaming || v.Status == Allocating || v.Status == Matching {
+			count++
+		}
+		if v.Status == Fetching {
+			count2++
+		}
+		if v.Status == Travelling {
+			count3++
+		}
+	}
+	statsInfo := &StatsFormat{
+		Time:              s.SimulationTime.Format("3:4:5PM"),
+		RoamingDrivers:    count,
+		FetchingDrivers:   count2,
+		TravellingDrivers: count3,
+	}
+
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 3,
+		Data:          statsInfo,
+	}
+	e, err := json.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s.Send <- string(e)
+}
+
+func (s *Simulation) StartTimer() {
+	s.isRunning = true
+	for range s.Ticker {
+		s.SimulationTime = s.SimulationTime.Add(1 * time.Minute)
+		//fmt.Printf("[Time by StartTimer]%v\n", s.SimulationTime)
+	}
 }

@@ -8,7 +8,7 @@ import (
 
 // Implement algorithm here
 func dispatcher(e *Environment) {
-	tick := time.Tick(e.S.MasterSpeed * time.Millisecond) // TODO: master timer
+	tick := time.Tick(e.S.DispatcherSpeed * time.Millisecond) // TODO: master timer
 
 	for {
 		select {
@@ -23,10 +23,11 @@ func dispatcher(e *Environment) {
 				if v.Status == Roaming {
 					roamingDrivers = append(roamingDrivers, v)
 					noOfRoamingDrivers++
-					// change roaming to allocating status!! todo!! - for migrating drivers
+					v.Status = Allocating // change roaming to allocating to prevent double task allocation when migrating
 				}
 			}
 			e.DriverAgentMutex.Unlock()
+			//TODO: Duplicate code?
 			sort.SliceStable(roamingDrivers, func(i, j int) bool {
 				return roamingDrivers[i].GetRankingIndex() > roamingDrivers[j].GetRankingIndex()
 			})
@@ -62,13 +63,24 @@ func dispatcher(e *Environment) {
 					for i := 0; i < len(tasks); i++ {
 						roamingDrivers[i].Request <- Message{Task: tasks[i]}
 					}
+					if len(roamingDrivers) > len(tasks) {
+						noOfTasks := len(tasks)
+						for k := 0; k < len(roamingDrivers[noOfTasks:]); k++ {
+							fmt.Printf("[Dispatcher %d]====================Driver %d leftover \n", e.Id, roamingDrivers[noOfTasks:][k].Id)
+							roamingDrivers[noOfTasks:][k].Request <- Message{Task: Task{Id: "-1"}} // send an invalid task.
+						}
+					}
+
 				} else {
 					fmt.Printf("[Dispatcher %d]No tasks available for assigning to the %d roaming drivers \n", e.Id, noOfRoamingDrivers)
+					for k := 0; k < len(roamingDrivers); k++ {
+						roamingDrivers[k].Request <- Message{Task: Task{Id: "-1"}} // send an invalid task.
+					}
 				}
 			} else {
 				fmt.Printf("[Dispatcher %d]No roaming drivers avialable for allocation.\n", e.Id)
 			}
-
+			fmt.Printf("[Dispatcher %d]End of Dispatching... Waiting for the next tick\n", e.Id)
 		}
 	}
 }
@@ -81,7 +93,7 @@ K:
 	// Grabs all tasks from the TaskQueue
 	for {
 		// Grab all tasks then break.
-		if len(tasks) == 100 { // TODO: Set toggle max value when choosing list of valuable tasks
+		if len(tasks) == 10 { // TODO: Set toggle max value when choosing list of valuable tasks
 			break
 		}
 		select {
@@ -96,7 +108,7 @@ K:
 
 	// sort the tasks' value in descending order
 	sort.SliceStable(tasks, func(i, j int) bool {
-		return tasks[i].Value > tasks[j].Value
+		return tasks[i].FinalValue > tasks[j].FinalValue
 	})
 
 	//fmt.Printf("[GVT]No of total tasks: %d, with no of roaming drivers: %d\n", len(tasks), k)

@@ -17,3 +17,10 @@ type OrderInfoFormat struct {
 	PickUpLocation  []float64 `json:"pick_up_coordinates"`  // lat lng...
 	DropOffLocation []float64 `json:"drop_off_coordinates"` // lat lng
 }
+
+type StatsFormat struct {
+	Time              string `json:"time"`
+	RoamingDrivers    int    `json:"no_of_roaming_drivers"`
+	FetchingDrivers   int    `json:"no_of_picking_up_drivers"`
+	TravellingDrivers int    `json:"no_of_travelling_drivers"`
+}

@@ -2,6 +2,7 @@ package dispatchsim
 
 import (
 	"fmt"
+	"log"
 	"strconv"
 	"time"
 
@@ -15,10 +16,11 @@ const (
 	Matching
 	Fetching
 	Travelling
+	Allocating
 )
 
 func (d DriverStatus) String() string {
-	return [...]string{"Roaming", "Matching", "Fetching", "Travelling"}[d]
+	return [...]string{"Roaming", "Matching", "Fetching", "Travelling", "Allocating"}[d]
 }
 
 type DriverAgent struct {
@@ -88,28 +90,46 @@ func (d *DriverAgent) ProcessTask2() {
 			switch d.Status {
 			case Roaming:
 				fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-				d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
+				//d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
+				// select {
+				// case t := <-d.Request:
+				// 	fmt.Printf("Task address @ during matching: %p\n", &t)
+				// 	d.Status = Matching
+				// 	d.PendingTask = t.Task
+				// 	d.CurrentTask = t.Task
+				// 	fmt.Printf("Driver %d got Task %v! \n", d.Id, t.Task.Id)
+				// default:
+
+				// }
+			case Allocating:
+				fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
 				select {
 				case t := <-d.Request:
-					fmt.Printf("Task address @ during matching: %p\n", &t)
-					d.Status = Matching
-					d.PendingTask = t.Task
-					d.CurrentTask = t.Task
-					fmt.Printf("Driver %d got Task %v! \n", d.Id, t.Task.Id)
+					// fmt.Printf("Task address @ during matching: %p\n", &t)
+					if t.Task.Id != "-1" {
+						d.Status = Matching
+						d.PendingTask = t.Task
+						d.CurrentTask = t.Task
+						fmt.Printf("Driver %d got Task %v! \n", d.Id, t.Task.Id)
+					} else {
+						d.Status = Roaming
+						fmt.Printf("Driver %d did not get any tasks \n", d.Id)
+					}
 				default:
 
 				}
 			case Matching:
-				d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
+				//d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
 
 				if d.AcceptRide() == true {
 					d.CurrentTask = d.PendingTask
 					d.PendingTask = Task{Id: "null"} // bad way...
 					d.Status = Fetching
-					//d.E.Tasks[d.CurrentTask.Id].WaitStart = time.Now()
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = time.Now()
+					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
+					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = d.E.S.SimulationTime
+					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 					d.ComputeRegret()
-					d.DestinationLocation = d.CurrentTask.EndCoordinate
+					d.DestinationLocation = d.CurrentTask.StartCoordinate
 					d.ChangeDestination <- "change message"
 				} else {
 					// send Tasks to TaskQueue
@@ -121,16 +141,17 @@ func (d *DriverAgent) ProcessTask2() {
 				fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
 			case Fetching:
 				fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-				d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
+				//d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
 				reached, ok := d.ReachTaskPosition()
 				if ok == true && reached == true {
 					fmt.Printf("Driver %d has reached the passenger \n", d.Id)
 					// driver has arrived at task location
 
-					x := time.Now()
+					x := d.E.S.SimulationTime
 					d.CurrentTask.WaitEnd = x
+					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitEnd = x
-					//d.E.Tasks[d.CurrentTask.Id].WaitEnd =x
+					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 					d.Status = Travelling
 					d.DestinationLocation = d.CurrentTask.EndCoordinate
 					v := [][]float64{}
@@ -142,14 +163,16 @@ func (d *DriverAgent) ProcessTask2() {
 				}
 			case Travelling:
 				fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-				d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
+				//d.E.S.Send <- "Driver " + strconv.Itoa(d.Id) + " is " + d.Status.String()
 				reached, ok := d.ReachTaskDestination()
 				if ok == true && reached == true {
 					// driver has completed the task
-					x := time.Now()
+					x := d.E.S.SimulationTime
 					d.CurrentTask.TaskEnded = x
 					//d.E.Tasks[d.CurrentTask.Id].TaskEnded = x
+					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].TaskEnded = x
+					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 					d.E.FinishQueue <- d.CurrentTask // put into FinishQueue
 					d.CompleteTask()
 					d.ComputeFatigue()
@@ -165,6 +188,7 @@ func (d *DriverAgent) ProcessTask2() {
 		}
 	}
 	fmt.Printf("[Driver %d - Env %d]Driver agent function finished\n", d.Id, d.E.Id)
+	log.Fatalf("[Driver %d] Ended", d.Id)
 }
 
 func (d *DriverAgent) Migrate() bool {
@@ -249,7 +273,7 @@ func (d *DriverAgent) Drive() {
 					case <-d.ChangeDestination:
 						v := [][]float64{}
 						v = append(v, latLngToSlice(d.CurrentLocation))
-						v = append(v, latLngToSlice(d.CurrentTask.EndCoordinate))
+						v = append(v, latLngToSlice(d.CurrentTask.StartCoordinate))
 						c := SendFormat{2, 2, DriverInfoFormat{d.E.Id, d.Id, v}}
 						d.E.S.Send <- structToString(c)
 						//d.E.S.Send <- "2,2," + strconv.Itoa(d.E.Id) + "," + strconv.Itoa(d.Id) + "," + latLngToString(d.CurrentLocation) + "," + latLngToString(d.CurrentTask.StartPosition) + ",4"
@@ -298,7 +322,7 @@ func (d *DriverAgent) DriveToNextPoint() {
 		d.Waypoint = d.Waypoint[:0]
 	case noOfWaypoints == 0:
 		fmt.Printf("[Driver %d - Env %d]No more waypoint to drive\n", d.Id, d.E.Id)
-		if d.Status == Roaming {
+		if d.Status == Roaming || d.Status == Allocating || d.Status == Matching {
 			// Driver has reached the last point of the waypoint
 			// Generate a new random destination and its waypoint
 			v := [][]float64{}
@@ -328,17 +352,15 @@ func (d *DriverAgent) AcceptRide() bool {
 	// }
 }
 
-// TODO: implement movement
 func (d *DriverAgent) ReachTaskPosition() (bool, bool) {
 	fmt.Printf("[Driver %d - Env %d]Checking whether reach passenger \n", d.Id, d.E.Id)
-	if d.CurrentLocation == d.CurrentTask.EndCoordinate {
+	if d.CurrentLocation == d.CurrentTask.StartCoordinate {
 		return true, true
 	} else {
 		return false, true
 	}
 }
 
-// TODO: implement movement
 func (d *DriverAgent) ReachTaskDestination() (bool, bool) {
 	fmt.Printf("[Driver %d - Env %d]Checking whether reach passenger's destination \n", d.Id, d.E.Id)
 	if d.CurrentLocation == d.CurrentTask.EndCoordinate {
@@ -380,11 +402,12 @@ func (d *DriverAgent) ComputeMotivation() {
 	d.Motivation = d.Motivation + 1
 }
 
-// use goroutines?
+// use goroutines? no...
 func (d *DriverAgent) ComputeRegret() {
 	fmt.Printf("Computing Regret for Driver %d - Env %d\n", d.Id, d.E.Id)
 	fmt.Printf("Regret now: %f, Value of Order: %f, Average value of Orders: %f\n", d.Regret, float64(d.CurrentTask.Value), d.E.ComputeAverageValue(d.Reputation))
-	computedRegret := d.Regret - float64(d.CurrentTask.Value) + d.E.ComputeAverageValue(d.Reputation)
+	// Driver's current regret - current task's value + average value of orders which other drivers take at the point of time (with similar reputation)
+	computedRegret := d.Regret - float64(d.CurrentTask.Value) + d.S.ComputeAverageValue(d.Reputation)
 
 	if computedRegret < 0 {
 		d.Regret = 0

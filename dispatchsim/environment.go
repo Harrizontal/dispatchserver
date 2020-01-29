@@ -19,6 +19,7 @@ type Environment struct {
 	DriverAgentMutex  sync.RWMutex
 	NoOfIntialDrivers int
 	Tasks             map[string]*Task // store all tasks
+	TaskMutex         sync.RWMutex
 	TaskQueue         chan Task
 	FinishQueue       chan Task
 	TotalTasks        int
@@ -37,6 +38,7 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 		DriverAgentMutex:  sync.RWMutex{},
 		NoOfIntialDrivers: noOfDrivers,
 		Tasks:             make(map[string]*Task), // id -> task
+		TaskMutex:         sync.RWMutex{},
 		TaskQueue:         make(chan Task, 10000),
 		FinishQueue:       make(chan Task, 10000),
 		TotalTasks:        0,
@@ -50,7 +52,9 @@ func (e *Environment) GiveTask(o Order) {
 	task := CreateTaskFromOrder(o, e)
 	fmt.Printf("[Environment %d]New Task Generated! - Task %v \n", e.Id, task.Id)
 	e.TaskQueue <- task
+	e.TaskMutex.Lock()
 	e.Tasks[task.Id] = &task
+	e.TaskMutex.Unlock()
 }
 
 // generate new drivers
@@ -129,17 +133,17 @@ func (e *Environment) Stats() {
 // compute average value of orders with similiar rating
 // TODO: similiar rating should be adjustable.... i think...
 func (e *Environment) ComputeAverageValue(reputation float64) float64 {
-	var accumulatedTaskValue = 0
+	var accumulatedTaskValue float64 = 0
 	var totalDriversWithTask = 0
 
 	for _, v := range e.DriverAgents {
 		if v.CurrentTask.Id != "null" && v.Status != Roaming {
-			fmt.Printf("Driver %d has Task %d with value of %d \n",
+			fmt.Printf("[ComputeAverageValue] Driver %d has Task %v with value of %d \n",
 				v.Id,
 				v.CurrentTask.Id,
-				v.CurrentTask.Value,
+				v.CurrentTask.FinalValue,
 			)
-			accumulatedTaskValue = v.CurrentTask.Value + accumulatedTaskValue
+			accumulatedTaskValue = v.CurrentTask.FinalValue + accumulatedTaskValue
 			totalDriversWithTask++
 		}
 	}

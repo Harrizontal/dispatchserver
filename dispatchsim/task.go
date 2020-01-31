@@ -2,6 +2,7 @@ package dispatchsim
 
 import (
 	"math"
+	"math/rand"
 	"time"
 )
 
@@ -45,7 +46,16 @@ func CreateTaskFromOrder(o Order, e *Environment) Task {
 	// fmt.Printf("o.Distance*e.S.RatePerKM: %v\n", o.Distance*e.S.RatePerKM)
 	// fmt.Printf("value: %v\n", math.Round(float64(o.Distance*e.S.RatePerKM)*100)/100)
 
-	return Task{
+	var taskValue float64 = 0.00
+	// calculate taskvalue
+	switch e.S.TaskParameters.TaskValueType {
+	case "random":
+		taskValue = float64(GenerateRandomValue(1, 10)) * e.S.TaskParameters.ValuePerKM
+	case "distance":
+		taskValue = math.Round(float64(o.Distance*e.S.TaskParameters.ValuePerKM)*100) / 100
+	}
+
+	task := Task{
 		Id:              o.Id,
 		EnvironmentId:   e.Id,
 		StartCoordinate: o.StartCoordinate,
@@ -54,13 +64,28 @@ func CreateTaskFromOrder(o Order, e *Environment) Task {
 		DropOffLocation: LatLng{Lat: o.DropOffLat, Lng: o.DropOffLng},
 		TaskCreated:     time.Now(),
 		Value:           int(o.Distance), // random value from 1 to 10 (for now... TODO!)
-		FinalValue:      math.Round(float64(o.Distance*e.S.RatePerKM)*100) / 100,
+		FinalValue:      taskValue,
 		Distance:        o.Distance,
 	}
+
+	return task
+}
+
+func GenerateRandomValue(min int, max int) int {
+	rand.Seed(time.Now().UnixNano())
+	n := min + rand.Intn(max-min+1)
+	return n
 }
 
 // TODO: generate rating from 0 to 5
-func (t *Task) ComputeRating() float64 {
+func (t *Task) ComputeRating(s *Simulation) float64 {
 	// gives rating
-	return 5
+	switch s.TaskParameters.ReputationGivenType {
+	case "random":
+		return float64(GenerateRandomValue(0, 5)) // return int
+	case "fixed":
+		return s.TaskParameters.ReputationValue
+	default:
+		return 5
+	}
 }

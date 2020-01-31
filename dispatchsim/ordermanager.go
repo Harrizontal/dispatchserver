@@ -153,7 +153,7 @@ func (om *OrderManager) sendOrderToEnvironment(o Order) {
 		// no environment is able to take in this order
 		if !tasksGiven {
 			// order will get lost.
-			fmt.Printf("[SendOrderToEnv]No available environment to take order %v %d\n", o.Id)
+			fmt.Printf("[SendOrderToEnv]No available environment to take order %v\n", o.Id)
 			tasksGiven = false
 		}
 	} else {

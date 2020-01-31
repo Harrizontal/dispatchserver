@@ -24,3 +24,14 @@ type StatsFormat struct {
 	FetchingDrivers   int    `json:"no_of_picking_up_drivers"`
 	TravellingDrivers int    `json:"no_of_travelling_drivers"`
 }
+
+type StatsRegretFormat struct {
+	Time          string               `json:"time"`
+	DriversRegret []DriverRegretFormat `json:"drivers_regret"`
+}
+
+type DriverRegretFormat struct {
+	EnvironmentId int     `json:"environment_id"` // not need for displaying in the front end
+	DriverId      int     `json:"driver_id"`
+	Regret        float64 `json:"regret"`
+}

@@ -13,6 +13,7 @@ import (
 type Environment struct {
 	S                 *Simulation
 	Id                int
+	Dispatcher        *Dispatcher
 	Polygon           orb.Polygon
 	PolygonLatLng     []LatLng
 	DriverAgents      map[int]*DriverAgent
@@ -28,6 +29,7 @@ type Environment struct {
 	WaitGroup         *sync.WaitGroup // for ending simulation
 }
 
+// Note that dispatcher comes at .Run() function
 func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bool, generateTasks bool, p []LatLng) Environment {
 	return Environment{
 		S:                 s,
@@ -72,39 +74,10 @@ func (e *Environment) GiveTask(o Order) {
 
 func (e *Environment) Run() {
 
-	// for i := 0; i < e.NoOfIntialDrivers; i++ {
-	// 	driver := CreateDriver(startingDriverId, e)
-	// 	e.DriverAgents[startingDriverId] = &driver
-	// 	go e.DriverAgents[startingDriverId].ProcessTask2()
-	// 	startingDriverId++
-	// }
+	dis := SetupDispatcher(e)
+	e.Dispatcher = &dis
+	go dis.dispatcher(e)
 
-	go dispatcher(e)
-
-	//TODO: support adding drivers, migrating drivers
-
-	// condition to end simulation
-	// 	var countTask int = 0
-	// End:
-	// 	for {
-	// 		select {
-	// 		case task := <-e.FinishQueue:
-	// 			fmt.Printf("[Environment %d]Task %d completed :) \n", e.Id, task.Id)
-	// 			countTask++
-	// 			fmt.Printf("[Environment %d]Task completed: %d / %d\n", e.Id, countTask, e.TotalTasks)
-	// 		}
-
-	// 		if countTask == e.TotalTasks {
-	// 			fmt.Printf("[Environment %d]All tasks completed\n", e.Id)
-	// 			break End
-	// 		}
-	// 	}
-
-	// 	// closing simluation
-	// 	close(e.Quit) // stop all driver agent goroutines and dispatcher
-	// 	fmt.Printf("[Environment %d]Environment ended\n", e.Id)
-	// 	e.Stats()
-	// 	return
 }
 
 func (e *Environment) Stats() {

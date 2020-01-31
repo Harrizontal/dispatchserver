@@ -7,8 +7,8 @@ import (
 )
 
 // Implement algorithm here
-func dispatcher(e *Environment) {
-	tick := time.Tick(e.S.DispatcherSpeed * time.Millisecond) // TODO: master timer
+func (dis *Dispatcher) dispatcher(e *Environment) {
+	tick := time.Tick(time.Duration(e.S.DispatcherParameters.DispatchInterval) * time.Millisecond) // TODO: master timer
 
 	for {
 		select {
@@ -38,7 +38,7 @@ func dispatcher(e *Environment) {
 				//fmt.Println("[Dispatcher]Start allocation")
 				tasks := GetValuableTasks(noOfRoamingDrivers, e.TaskQueue)
 				if len(tasks) > 0 {
-					fmt.Printf("[Dispatcher %d]Assigning task(s) to roaming driver(s) \n", e.Id)
+					fmt.Printf("[Dispatcher %d]===Assigning task(s) to roaming driver(s)===\n", e.Id)
 					for i := 0; i < len(tasks); i++ {
 						//fmt.Printf("[Dispatcher]Task %d with value of %d is to be allocated \n", tasks[i].Id, tasks[i].Value)
 					}
@@ -59,14 +59,23 @@ func dispatcher(e *Environment) {
 					// 		roamingDrivers[i].GetRankingIndex())
 					// }
 
+					// COMMENT THIS SHIT IF SHIT GONE MAD
+					//go dis.ComputeDriversRegret(roamingDrivers[:len(tasks)])
+
 					// assigning task to driver
 					for i := 0; i < len(tasks); i++ {
+
+						fmt.Printf("[Dispatcher %d]Task %v with value of %v assigned to Driver %d with index of %v\n",
+							e.Id, tasks[i].Id, tasks[i].FinalValue, roamingDrivers[i].Id, roamingDrivers[i].GetRankingIndex())
 						roamingDrivers[i].Request <- Message{Task: tasks[i]}
 					}
+
+					// computing regret over here
+
 					if len(roamingDrivers) > len(tasks) {
 						noOfTasks := len(tasks)
 						for k := 0; k < len(roamingDrivers[noOfTasks:]); k++ {
-							fmt.Printf("[Dispatcher %d]====================Driver %d leftover \n", e.Id, roamingDrivers[noOfTasks:][k].Id)
+							fmt.Printf("[Dispatcher %d]Driver %d with index of %v not assigned to any tasks\n", e.Id, roamingDrivers[noOfTasks:][k].Id, roamingDrivers[noOfTasks:][k].GetRankingIndex())
 							roamingDrivers[noOfTasks:][k].Request <- Message{Task: Task{Id: "-1"}} // send an invalid task.
 						}
 					}
@@ -80,9 +89,73 @@ func dispatcher(e *Environment) {
 			} else {
 				fmt.Printf("[Dispatcher %d]No roaming drivers avialable for allocation.\n", e.Id)
 			}
-			fmt.Printf("[Dispatcher %d]End of Dispatching... Waiting for the next tick\n", e.Id)
+			fmt.Printf("[Dispatcher %d]===End of Assigning task(s) to roaming driver(s)===\n", e.Id)
 		}
 	}
+}
+
+type Dispatcher struct {
+	E                    *Environment
+	Response             chan DriverMatchingResult
+	DriverAgents         map[int]*DriverAgent
+	DriverAgentsResponse map[int]int // 0 - havent response, 1 - accepted, 2 - rejected
+}
+
+func SetupDispatcher(e *Environment) Dispatcher {
+	return Dispatcher{
+		E:                    e,
+		Response:             make(chan DriverMatchingResult, 10000),
+		DriverAgents:         make(map[int]*DriverAgent),
+		DriverAgentsResponse: make(map[int]int),
+	}
+}
+
+type DriverMatchingResult struct {
+	Accept bool
+	Id     int
+}
+
+// This function is called when dispatching - could be wrong.
+func (dis *Dispatcher) ComputeDriversRegret(drivers []*DriverAgent) {
+	// reintialize map
+	dis.DriverAgents = make(map[int]*DriverAgent)
+	dis.DriverAgentsResponse = make(map[int]int)
+
+	// map array to map
+	for k := 0; k < len(drivers); k++ {
+		dis.DriverAgents[drivers[k].Id] = drivers[k]
+		dis.DriverAgentsResponse[drivers[k].Id] = 0
+	}
+
+K:
+	for {
+		select {
+		case r := <-dis.Response:
+			fmt.Printf("[ComputeDriversRegret]Response: %v\n", r)
+			if r.Accept {
+				dis.DriverAgentsResponse[r.Id] = 1 // We know that the driver accepts the task
+			} else {
+				dis.DriverAgentsResponse[r.Id] = 2 // We know that the driver rejects the task
+			}
+			var driverCount = 0
+			for _, v := range dis.DriverAgentsResponse {
+				if v == 0 {
+					break
+				}
+				driverCount++
+				if driverCount == len(dis.DriverAgentsResponse) {
+					break K
+				}
+			}
+		}
+	}
+
+	for k, _ := range dis.DriverAgentsResponse {
+		if dis.DriverAgentsResponse[k] == 1 {
+			dis.DriverAgents[k].ComputeRegret()
+		}
+	}
+	fmt.Printf("[ComputeDriversRegret]Finish computing regrets for drivers with tasks\n")
 }
 
 // Get k number of tasks ranking by the value.
@@ -98,7 +171,7 @@ K:
 		}
 		select {
 		case x := <-TaskQueue:
-			fmt.Printf("[GVT]Grab Task %d \n", x.Id)
+			//fmt.Printf("[GVT]Grab Task %d \n", x.Id)
 			tasks = append(tasks, x)
 		default:
 			// if no more tasks in channel, break.

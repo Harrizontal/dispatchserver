@@ -42,14 +42,13 @@ func wsEndpoint(w http.ResponseWriter, r *http.Request) {
 func reader(conn *websocket.Conn) {
 	for {
 		// read in a message
-		//fmt.Println("[Server]Waiting for message from client")
 		_, p, err := conn.ReadMessage()
 		if err != nil {
 			fmt.Printf("Error\n")
 			log.Println(err)
 			return
 		}
-		fmt.Println("[Server-Recieve]" + string(p))
+		//fmt.Println("[Server-Recieve]" + string(p))
 		simulator.Recieve <- string(p)
 	}
 }
@@ -58,7 +57,6 @@ func writer(conn *websocket.Conn) {
 	for {
 		select {
 		case sendMessage := <-simulator.Send:
-			//fmt.Println("[Server]Message from simulator sent")
 			if err := conn.WriteMessage(1, []byte(sendMessage)); err != nil {
 				log.Println(err)
 				return

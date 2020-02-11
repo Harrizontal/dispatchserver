@@ -15,6 +15,7 @@ type Simulation struct {
 	DriverAgents         map[int]*DriverAgent
 	DriverAgentMutex     sync.RWMutex
 	OM                   *OrderManager
+	RN                   *RoadNetwork
 	MasterSpeed          time.Duration
 	Recieve              chan string // recieve from websocket
 	Send                 chan string // send to websocket
@@ -49,16 +50,17 @@ func SetupSimulation() Simulation {
 		Environments:         make(map[int]*Environment),
 		DriverAgents:         make(map[int]*DriverAgent),
 		DriverAgentMutex:     sync.RWMutex{},
+		RN:                   SetupRoadNetwork2(),
 		MasterSpeed:          50,
 		Recieve:              make(chan string, 10000),
 		Send:                 make(chan string, 10000),
 		OrderQueue:           make(chan Order, 1000),
 		UpdateMap:            true, // set true to update mapbox
-		UpdateMapSpeed:       100,  // update speed to mapbox
+		UpdateMapSpeed:       500,  // update speed to mapbox
 		DispatcherSpeed:      5000,
 		UpdateStatsSpeed:     1000,
-		Ticker:               time.Tick(50 * time.Millisecond),                 // TODO: Make adjustable
-		SimulationTime:       time.Date(2020, 1, 23, 00, 30, 0, 0, time.Local), // TODO: Make adjustable
+		Ticker:               time.Tick(20 * time.Millisecond),                 // TODO: Make adjustable
+		SimulationTime:       time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local), // TODO: Make adjustable
 		TaskParameters:       defaultTaskParameters,
 		DispatcherParameters: defaultDispatcherParameters,
 	}
@@ -72,7 +74,7 @@ func (s *Simulation) Run() {
 	var k = false
 
 	go s.SendMapData()
-	//go s.SendStats()
+	go s.SendStats()
 
 	for {
 		select {
@@ -114,7 +116,7 @@ func (s *Simulation) Run() {
 					}
 					s.TaskParameters = sf.TaskParameters
 					s.DispatcherParameters = sf.DispatcherParameters
-					fmt.Printf("Task Value: %v \n", s.TaskParameters.ValuePerKM)
+					s.SendMessageToClient("Parameters applied")
 				}
 
 				fmt.Printf("[Simulator]End of case 0\n")
@@ -129,6 +131,7 @@ func (s *Simulation) Run() {
 				go env.Run()                                                 // run environment
 				startingDriverCount = startingDriverCount + inputNoOfDrivers // update driver id count
 				environmentId++
+				//SendEnvGeoJSON(s) // send polygon to client // TODO: settle this case in client
 			case 2: // drivers
 				commandTypeLevelTwo := command.([]interface{})[1].(float64)
 				eId := int(command.([]interface{})[2].(float64)) // get environmentid from the message
@@ -179,7 +182,10 @@ func (s *Simulation) Run() {
 
 				}
 			}
+		default:
+			//fmt.Println("[Simulation]Running")
 		}
+		//fmt.Println("[Simulation]Running2")
 	}
 	fmt.Println("[Simulation]Ended")
 }
@@ -192,9 +198,7 @@ func (s *Simulation) SendMapData() {
 		case <-tick:
 			//fmt.Printf("[Simulator]Sending map data\n")
 			if s.UpdateMap && s.isRunning { // send updates when there is Driver Agent available and environment placed
-				SendGeoJSON(s)
-				SendEnvGeoJSON(s)
-				SendTaskGeoJSON(s)
+				SendDriverTaskEnvGeoJSON(s)
 			}
 		default:
 
@@ -247,6 +251,44 @@ func (s *Simulation) ComputeAverageValue(d *DriverAgent) float64 {
 	}
 	//fmt.Printf("[ComputeAverageValue]Final Value: %v \n", averageTaskValue)
 	return averageTaskValue
+}
+
+func (s *Simulation) GetMinMaxReputationFatigue() [2][2]float64 {
+	var first bool = false
+	var minReputation float64 = 0
+	var maxReputation float64 = 0
+	var minFatigue float64 = 0
+	var maxFatigue float64 = 0
+	s.DriverAgentMutex.Lock()
+	for _, v := range s.DriverAgents {
+		if !first {
+			minReputation = v.Reputation
+			maxReputation = v.Reputation
+			minFatigue = v.Fatigue
+			maxFatigue = v.Fatigue
+			first = true
+		}
+
+		// Reputation
+		if v.Reputation < minReputation {
+			minReputation = v.Reputation
+		}
+
+		if v.Reputation > maxReputation {
+			maxReputation = v.Reputation
+		}
+
+		// Fatigue
+		if v.Fatigue < minFatigue {
+			minFatigue = v.Fatigue
+		}
+
+		if v.Fatigue > maxFatigue {
+			maxFatigue = v.Fatigue
+		}
+	}
+	s.DriverAgentMutex.Unlock()
+	return [2][2]float64{{minReputation, maxReputation}, {minFatigue, maxFatigue}}
 }
 
 // e.g 2,0,{environmentId},{DriverId}
@@ -347,7 +389,6 @@ func sendCorrectedLocation(command interface{}, s *Simulation) {
 
 	s.OM.Recieve <- r
 }
-
 func SendEnvGeoJSON(s *Simulation) {
 	geojson := &GeoJSONFormat{
 		Type:     "FeatureCollection",
@@ -355,7 +396,6 @@ func SendEnvGeoJSON(s *Simulation) {
 	}
 
 	for _, v := range s.Environments {
-		//TODO: Separate polygon into another sendgeojson function
 		feature := Feature{
 			Type: "Feature",
 			Geometry: Geometry2{
@@ -363,46 +403,6 @@ func SendEnvGeoJSON(s *Simulation) {
 				Coordinates: twoLatLngtoArrayFloat(v.PolygonLatLng),
 			},
 			Properties: Properties{},
-		}
-		geojson.Features = append(geojson.Features, feature)
-	}
-
-	sendformat := &SendFormat{
-		Command:       1,
-		CommandSecond: 0,
-		Data:          geojson,
-	}
-
-	e, err := json.Marshal(sendformat)
-	if err != nil {
-		fmt.Println(err)
-	}
-	s.Send <- string(e)
-}
-
-func SendGeoJSON(s *Simulation) {
-
-	geojson := &GeoJSONFormat{
-		Type:     "FeatureCollection",
-		Features: make([]Feature, 0),
-	}
-
-	for _, v := range s.DriverAgents {
-		feature := Feature{
-			Type: "Feature",
-			Geometry: Geometry{
-				Type:        "Point",
-				Coordinates: latlngToArrayFloat(v.CurrentLocation),
-			},
-			Properties: Properties{
-				Type: "Driver",
-				Information: DriverFormat{
-					Id:            v.Id,
-					EnvironmentId: v.E.Id,
-					Status:        v.Status,
-					CurrentTask:   v.CurrentTask.Id,
-				},
-			},
 		}
 		geojson.Features = append(geojson.Features, feature)
 	}
@@ -417,17 +417,29 @@ func SendGeoJSON(s *Simulation) {
 	if err != nil {
 		fmt.Println(err)
 	}
+
 	s.Send <- string(e)
 
 }
 
-func SendTaskGeoJSON(s *Simulation) {
+func SendDriverTaskEnvGeoJSON(s *Simulation) {
 	geojson := &GeoJSONFormat{
 		Type:     "FeatureCollection",
 		Features: make([]Feature, 0),
 	}
 
 	for _, v := range s.Environments {
+		// polygon features
+		// feature := Feature{
+		// 	Type: "Feature",
+		// 	Geometry: Geometry2{
+		// 		Type:        "Polygon",
+		// 		Coordinates: twoLatLngtoArrayFloat(v.PolygonLatLng),
+		// 	},
+		// 	Properties: Properties{},
+		// }
+		// geojson.Features = append(geojson.Features, feature)
+
 		v.TaskMutex.Lock()
 		for _, v2 := range v.Tasks {
 			if (v2.WaitEnd == time.Time{}) {
@@ -438,10 +450,10 @@ func SendTaskGeoJSON(s *Simulation) {
 						Coordinates: latlngToArrayFloat(v2.PickUpLocation),
 					},
 					Properties: Properties{
-						Type: "Task",
 						Information: TaskFormat{
 							Id:            v2.Id,
 							EnvironmentId: v2.EnvironmentId,
+							Type:          "Task",
 							StartPosition: latlngToArrayFloat(v2.PickUpLocation),
 							EndPosition:   latlngToArrayFloat(v2.DropOffLocation),
 							WaitStart:     v2.WaitStart,
@@ -459,9 +471,29 @@ func SendTaskGeoJSON(s *Simulation) {
 		v.TaskMutex.Unlock()
 	}
 
+	for _, v := range s.DriverAgents {
+		feature := Feature{
+			Type: "Feature",
+			Geometry: Geometry{
+				Type:        "Point",
+				Coordinates: latlngToArrayFloat(v.CurrentLocation),
+			},
+			Properties: Properties{
+				Information: DriverFormat{
+					Id:            v.Id,
+					EnvironmentId: v.E.Id,
+					Type:          "Driver",
+					Status:        v.Status,
+					CurrentTask:   v.CurrentTask.Id,
+				},
+			},
+		}
+		geojson.Features = append(geojson.Features, feature)
+	}
+
 	sendformat := &SendFormat{
 		Command:       1,
-		CommandSecond: 2,
+		CommandSecond: 1,
 		Data:          geojson,
 	}
 
@@ -539,10 +571,25 @@ func SendDriverStats(s *Simulation) {
 
 }
 
+func (s *Simulation) SendMessageToClient(message string) {
+
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 0,
+		Data:          message,
+	}
+
+	f, err := json.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s.Send <- string(f)
+
+}
 func (s *Simulation) StartTimer() {
 	s.isRunning = true
 	for range s.Ticker {
-		s.SimulationTime = s.SimulationTime.Add(1 * time.Minute)
+		s.SimulationTime = s.SimulationTime.Add(5000 * time.Millisecond)
 		//fmt.Printf("[Time by StartTimer]%v\n", s.SimulationTime)
 	}
 }

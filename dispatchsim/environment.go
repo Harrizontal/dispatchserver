@@ -82,16 +82,16 @@ func (e *Environment) Run() {
 
 func (e *Environment) Stats() {
 	fmt.Println("Stats:")
-	for k, v := range e.DriverAgents {
-		fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f, Ranking Index: %f\n",
-			k,
-			v.TasksCompleted,
-			v.Reputation,
-			v.Fatigue,
-			v.Motivation,
-			v.Regret,
-			v.GetRankingIndex())
-	}
+	// for k, v := range e.DriverAgents {
+	// 	fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f, Ranking Index: %f\n",
+	// 		k,
+	// 		v.TasksCompleted,
+	// 		v.Reputation,
+	// 		v.Fatigue,
+	// 		v.Motivation,
+	// 		v.Regret,
+	// 		v.GetRankingIndex())
+	// }
 	// for i := 0; i < len(e.DriverAgents); i++ {
 	// 	fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f\n",
 	// 		i,

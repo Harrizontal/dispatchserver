@@ -23,7 +23,6 @@ type Geometry2 struct {
 }
 
 type Properties struct {
-	Type        string      `json:"type"`
 	Information interface{} `json:"information"` // accepts DriverFormat or Task Format
 }
 
@@ -32,11 +31,13 @@ type DriverFormat struct {
 	EnvironmentId int          `json:"environment_id"`
 	Status        DriverStatus `json:"status"`
 	CurrentTask   string       `json:"current_task_id"`
+	Type          string       `json:"type"`
 }
 
 type TaskFormat struct {
 	Id            string    `json:"id"`
 	EnvironmentId int       `json:"environment_id"`
+	Type          string    `json:"type"`
 	StartPosition []float64 `json:"start_coordinates"`
 	EndPosition   []float64 `json:"end_coordinates"`
 	WaitStart     time.Time `json:"start_wait"`

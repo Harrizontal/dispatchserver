@@ -1,6 +1,7 @@
 package dispatchsim
 
 import (
+	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -80,12 +81,14 @@ func GenerateRandomValue(min int, max int) int {
 // TODO: generate rating from 0 to 5
 func (t *Task) ComputeRating(s *Simulation) float64 {
 	// gives rating
+	fmt.Printf("[ComputeRating] %v", s.TaskParameters.ReputationGivenType)
 	switch s.TaskParameters.ReputationGivenType {
 	case "random":
-		return float64(GenerateRandomValue(0, 5)) // return int
+		return float64(GenerateRandomValue(0, 5))
 	case "fixed":
+		// return 3.00
 		return s.TaskParameters.ReputationValue
 	default:
-		return 5
+		return float64(GenerateRandomValue(0, 5)) // return int
 	}
 }

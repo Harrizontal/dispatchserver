@@ -61,7 +61,7 @@ func writer(conn *websocket.Conn) {
 				log.Println(err)
 				return
 			}
-		default:
+			//default:
 		}
 	}
 }

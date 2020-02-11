@@ -2,6 +2,7 @@ package dispatchsim
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"time"
 )
@@ -29,14 +30,14 @@ type DriverMatchingResult struct {
 
 // Matching algorithm here
 func (dis *Dispatcher) dispatcher(e *Environment) {
-	tick := time.Tick(time.Duration(e.S.DispatcherParameters.DispatchInterval) * time.Millisecond) // TODO: master timer
-
+	//tick := time.Tick(time.Duration(e.S.DispatcherParameters.DispatchInterval) * time.Millisecond) // TODO: master timer
+	ticker := time.Tick(500 * time.Millisecond)
 	for {
 		select {
 		case <-e.Quit:
 			return
-		case <-tick:
-
+		case <-ticker:
+			fmt.Printf("[Dispatcher %d - %v]Start dispatch algorithm\n", e.Id, dis.E.S.SimulationTime)
 			noOfRoamingDrivers := 0
 			var roamingDrivers = make([]*DriverAgent, 0)
 
@@ -44,6 +45,7 @@ func (dis *Dispatcher) dispatcher(e *Environment) {
 			mmRepFat := e.S.GetMinMaxReputationFatigue()
 			// fmt.Printf("minmax: %v", mmRepFat)
 			for _, v := range e.DriverAgents {
+				//fmt.Printf("[Dispatcher %d] Driver %d -> %v\n", e.Id, v.Id, v.Status)
 				if v.Status == Roaming {
 					roamingDrivers = append(roamingDrivers, v)
 					noOfRoamingDrivers++
@@ -52,9 +54,6 @@ func (dis *Dispatcher) dispatcher(e *Environment) {
 			}
 			e.DriverAgentMutex.Unlock()
 			//TODO: Duplicate code?
-			sort.SliceStable(roamingDrivers, func(i, j int) bool {
-				return roamingDrivers[i].GetRankingIndex(&mmRepFat) > roamingDrivers[j].GetRankingIndex(&mmRepFat)
-			})
 
 			//fmt.Printf("NoOfRoamingDrivers: %d\n", noOfRoamingDrivers)
 
@@ -62,58 +61,148 @@ func (dis *Dispatcher) dispatcher(e *Environment) {
 				//fmt.Println("[Dispatcher]Start allocation")
 				tasks := GetValuableTasks(noOfRoamingDrivers, e.TaskQueue)
 				if len(tasks) > 0 {
-					fmt.Printf("[Dispatcher %d]===Assigning task(s) to roaming driver(s)===\n", e.Id)
-					for i := 0; i < len(tasks); i++ {
-						//fmt.Printf("[Dispatcher]Task %d with value of %d is to be allocated \n", tasks[i].Id, tasks[i].Value)
+					fmt.Printf("[Dispatcher %d]Assigning task(s) to roaming driver(s)\n", e.Id)
+
+					// sort drivers according to ranking index
+					sort.SliceStable(roamingDrivers, func(i, j int) bool {
+						return roamingDrivers[i].GetRankingIndex(&mmRepFat) > roamingDrivers[j].GetRankingIndex(&mmRepFat)
+					})
+
+					var approvedRD = make([]*DriverAgent, 0)
+					var matchedT = make([]*Task, 0)
+					var rejectedRD = make([]*DriverAgent, 0)
+					var unmatchedT = make([]*Task, 0)
+					var leftoverRD = make([]*DriverAgent, 0)
+
+					d := 0
+					t := 0
+					ad := 0
+					noOfDrivers := len(roamingDrivers) // minus 1 to match array
+					noOfTasks := len(tasks)
+					fmt.Printf("[Dispatcher Info] %v %v\n", noOfDrivers, noOfTasks)
+					for d < noOfDrivers {
+						//fmt.Printf("a\n")
+					L:
+						for t < noOfTasks {
+							_, _, distance, _ := dis.E.S.RN.G_GetWaypoint(roamingDrivers[d].CurrentLocation, tasks[t].StartCoordinate)
+							if distance != math.Inf(1) {
+								fmt.Printf("Driver %d is approved to Task %v\n", roamingDrivers[d].Id, tasks[t].Id)
+								approvedRD = append(approvedRD, roamingDrivers[d])
+								matchedT = append(matchedT, &tasks[t])
+								d++
+								t++
+								ad++
+								break L
+							} else {
+								fmt.Printf("Driver %d is cant handle Task %v due to task's location\n", roamingDrivers[d].Id, tasks[t].Id)
+								//rejectedRD = append(rejectedRD, roamingDrivers[d])
+								d++
+								break L
+							}
+							//fmt.Printf("b\n")
+						}
+
+						if d == noOfDrivers && t < noOfTasks {
+							unmatchedT = append(unmatchedT, &tasks[t])
+							d = ad
+							t++
+						}
+
+						if t == noOfTasks && d < noOfDrivers {
+							fmt.Printf("Driver %d is leftover\n", roamingDrivers[d].Id)
+							leftoverRD = append(leftoverRD, roamingDrivers[d])
+							d++
+						}
+
+						//fmt.Printf("c\n")
 					}
 
-					// Sort drivers' Driver Ranking Index in descending order!
-					// sort.SliceStable(roamingDrivers, func(i, j int) bool {
-					// 	return roamingDrivers[i].GetRankingIndex() > roamingDrivers[j].GetRankingIndex()
-					// })
+					for i := 0; i < len(approvedRD); i++ {
+						fmt.Printf("[approvedRD]Driver %v\n", approvedRD[i].Id)
+					}
 
-					// for printing - can delete!
-					// for i := 0; i < len(roamingDrivers); i++ {
-					// 	fmt.Printf("[Dispatcher]Roaming Driver %d with movtivation %f, reputation %f , fatigue %f and regret %f. Ranking Index: %f\n",
-					// 		roamingDrivers[i].Id,
-					// 		roamingDrivers[i].Motivation,
-					// 		roamingDrivers[i].Reputation,
-					// 		roamingDrivers[i].Fatigue,
-					// 		roamingDrivers[i].Regret,
-					// 		roamingDrivers[i].GetRankingIndex())
+					for i := 0; i < len(rejectedRD); i++ {
+						fmt.Printf("[rejectedRD]Driver %v\n", rejectedRD[i].Id)
+					}
+
+					for i := 0; i < len(leftoverRD); i++ {
+						fmt.Printf("[leftoverRD]Driver %v\n", leftoverRD[i].Id)
+					}
+
+					for i := 0; i < len(unmatchedT); i++ {
+						fmt.Printf("[unmatchedT]Task %v - Returning to queue\n", unmatchedT[i].Id)
+						//e.TaskQueue <- *unmatchedT[i]
+					}
+
+					// fmt.Printf("[TaskLeftOver info] %v %v\n", t, noOfTasks)
+					// if t < noOfTasks {
+					// 	for i := 0; i < len(tasks[t:]); i++ {
+					// 		fmt.Printf("[TaskLeftOver]Task %v\n", tasks[t:][i].Id)
+					// 		e.TaskQueue <- tasks[t:][i]
+					// 	}
 					// }
 
-					// COMMENT THIS SHIT IF SHIT GONE MAD
-					//go dis.ComputeDriversRegret(roamingDrivers[:len(tasks)])
-
-					// assigning task to driver
-					for i := 0; i < len(tasks); i++ {
-
-						fmt.Printf("[Dispatcher %d]Task %v with value of %v assigned to Driver %d\n",
-							e.Id, tasks[i].Id, tasks[i].FinalValue, roamingDrivers[i].Id)
-						roamingDrivers[i].Request <- Message{Task: tasks[i]}
+					// assigned task to drivers who have actual access to the task
+					for i := 0; i < len(approvedRD); i++ {
+						approvedRD[i].Request <- Message{Task: *matchedT[i]}
 					}
 
-					// computing regret over here
-
-					if len(roamingDrivers) > len(tasks) {
-						noOfTasks := len(tasks)
-						for k := 0; k < len(roamingDrivers[noOfTasks:]); k++ {
-							//fmt.Printf("[Dispatcher %d]Driver %d with index of %v not assigned to any tasks\n", e.Id, roamingDrivers[noOfTasks:][k].Id, roamingDrivers[noOfTasks:][k].GetRankingIndex())
-							roamingDrivers[noOfTasks:][k].Request <- Message{Task: Task{Id: "-1"}} // send an invalid task.
-						}
+					for i := 0; i < len(rejectedRD); i++ {
+						rejectedRD[i].Request <- Message{Task: Task{Id: "null"}}
 					}
+
+					for i := 0; i < len(leftoverRD); i++ {
+						leftoverRD[i].Request <- Message{Task: Task{Id: "null"}}
+					}
+
+					fmt.Printf("[Dispatcher]End of dispatch\n")
+					// // once we ensure that driver is able to go to task (driver might be in a deadlock location), we put the driver in approvedRoamingDrivers
+					// // else, goes to rejectedRoamingDrivers
+					// var approvedRoamingDrivers = make([]*DriverAgent, 0) // those drivers that CAN drive to their order's start coordinate
+					// var rejectedRoamingDrivers = make([]*DriverAgent, 0) // those drivers that CANNOT drive to their order's start coordinate
+
+					// // assigning task to driver
+					// for i := 0; i < len(tasks); i++ {
+					// 	_, _, distance, _ := dis.E.S.RN.G_GetWaypoint(roamingDrivers[i].CurrentLocation, tasks[i].StartCoordinate)
+					// 	if distance != math.Inf(1) {
+					// 		approvedRoamingDrivers = append(approvedRoamingDrivers, roamingDrivers[i])
+					// 	} else {
+					// 		rejectedRoamingDrivers = append(rejectedRoamingDrivers, roamingDrivers[i])
+					// 	}
+					// }
+
+					// // send invalid task to rejected roaming drivers
+					// for i := 0; i < len(rejectedRoamingDrivers); i++ {
+					// 	rejectedRoamingDrivers[i].Request <- Message{Task: Task{Id: "null"}} // send an invalid task
+					// }
+
+					// // assigning task to driver
+					// for i := 0; i < len(tasks); i++ {
+					// 	fmt.Printf("[Dispatcher %d]Task %v with value of %v assigned to Driver %d\n",
+					// 		e.Id, tasks[i].Id, tasks[i].FinalValue, approvedRoamingDrivers[i].Id)
+					// 	approvedRoamingDrivers[i].Request <- Message{Task: tasks[i]}
+					// }
+
+					// // if there is more roaming drivers than the tasks
+					// if len(approvedRoamingDrivers) > len(tasks) {
+					// 	noOfTasks := len(tasks)
+					// 	for k := 0; k < len(approvedRoamingDrivers[noOfTasks:]); k++ {
+					// 		//fmt.Printf("[Dispatcher %d]Driver %d with index of %v not assigned to any tasks\n", e.Id, roamingDrivers[noOfTasks:][k].Id, roamingDrivers[noOfTasks:][k].GetRankingIndex())
+					// 		fmt.Printf("[Dispatcher] Driver %d going back to Roaming\n", approvedRoamingDrivers[k].Id)
+					// 		approvedRoamingDrivers[noOfTasks:][k].Request <- Message{Task: Task{Id: "null"}} // send an invalid task.
+					// 	}
+					// }
 
 				} else {
 					fmt.Printf("[Dispatcher %d]No tasks available for assigning to the %d roaming drivers \n", e.Id, noOfRoamingDrivers)
 					for k := 0; k < len(roamingDrivers); k++ {
-						roamingDrivers[k].Request <- Message{Task: Task{Id: "-1"}} // send an invalid task.
+						roamingDrivers[k].Request <- Message{Task: Task{Id: "null"}} // send an invalid task.
 					}
 				}
 			} else {
 				fmt.Printf("[Dispatcher %d]No roaming drivers avialable for allocation.\n", e.Id)
 			}
-			fmt.Printf("[Dispatcher %d]===End of Assigning task(s) to roaming driver(s)===\n", e.Id)
+			fmt.Printf("[Dispatcher %d]End of Assigning task(s) to roaming driver(s)\n", e.Id)
 		}
 	}
 }

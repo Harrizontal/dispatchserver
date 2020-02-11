@@ -3,6 +3,7 @@ package dispatchsim
 import (
 	"fmt"
 	"log"
+	"math"
 	"time"
 
 	"github.com/paulmach/orb"
@@ -231,7 +232,7 @@ func (d *DriverAgent) ProcessTask3() {
 				select {
 				case t := <-d.Request:
 					// fmt.Printf("Task address @ during matching: %p\n", &t)
-					if t.Task.Id != "-1" {
+					if t.Task.Id != "null" {
 						d.Status = Matching
 						d.PendingTask = t.Task
 						d.CurrentTask = t.Task
@@ -306,7 +307,7 @@ func (d *DriverAgent) ProcessTask3() {
 					d.Status = Roaming
 					// fmt.Printf("[Driver %d - Env %d]Completed task %v \n", d.Id, d.CurrentTask.Id, d.E.Id)
 					// fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-					d.DriveToNextPoint3()
+					d.DriveToNextPoint4()
 				}
 			}
 			// migrate to another environment
@@ -327,7 +328,7 @@ func (d *DriverAgent) Drive3() {
 	// fmt.Printf("[Driver %v]Waypoints: %v\n", d.Id, len(waypoints))
 	// d.Waypoint = waypoints[1:]
 	// fmt.Printf("[Driver %v]Intializd waypoints\n", d.Id)
-
+	tick := time.Tick(50 * time.Millisecond)
 	fmt.Printf("[Driver %v]Getting random location\n", d.Id)
 	start := d.S.RN.G_GetRandomLocation()
 	d.CurrentLocation = start
@@ -336,23 +337,81 @@ func (d *DriverAgent) Drive3() {
 	for {
 	K:
 		select {
-		case x := <-d.Recieve2:
-			switch x {
-			case 2:
-				fmt.Printf("[Driver %d]Going appointed destination!\n", d.Id)
-				start, end, _, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
-				d.CurrentLocation = start   // no need this
-				d.DestinationLocation = end // no need this
-				d.Waypoint = waypoints[1:]
-				break K
+		case <-tick:
+			select {
+			case x := <-d.Recieve2:
+				switch x {
+				case 2:
+					fmt.Printf("[Driver %d]Going appointed destination!\n", d.Id)
+					start, end, distance, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
+					d.CurrentLocation = start   // no need this
+					d.DestinationLocation = end // no need this
+					switch x := len(waypoints); {
+					case x > 1:
+						d.Waypoint = waypoints[1:]
+					case x == 1:
+						d.Waypoint = waypoints
+					case x == 0:
+						if distance == math.Inf(1) {
+							fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
+							panic("waypoint is 0")
+						}
+						fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
+						panic("waypoint is 0")
+					}
+					fmt.Printf("[Driver %d]Updated current and destination location, and waypoints\n", d.Id)
+					break K
+				}
+			default:
+				d.DriveToNextPoint4()
 			}
-		default:
-			// fmt.Printf("Driving \n")
-			d.DriveToNextPoint3()
+
 		}
 	}
 
+	return
+	// for {
+	// 	select {
+	// 	case <-tick:
+	// 	K:
+	// 		select {
+	// 		case x := <-d.Recieve2:
+	// 			switch x {
+	// 			case 2:
+	// 				fmt.Printf("[Driver %d]Going appointed destination!\n", d.Id)
+	// 				start, end, _, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
+	// 				d.CurrentLocation = start   // no need this
+	// 				d.DestinationLocation = end // no need this
+	// 				d.Waypoint = waypoints[1:]
+	// 				break K
+	// 			}
+	// 		default:
+	// 			// fmt.Printf("Driving \n")
+	// 			d.DriveToNextPoint3()
+	// 		}
+	// 	}
+	// }
+
 	panic("[Driver]Drive Ended\n")
+}
+
+func (d *DriverAgent) DriveToNextPoint4() {
+	fmt.Printf("[Driver %d] DriveToNextPoint\n", d.Id)
+	switch noOfWaypoints := len(d.Waypoint); {
+	case noOfWaypoints >= 2:
+		d.CurrentLocation = d.Waypoint[0]
+		d.Waypoint = d.Waypoint[1:]
+	case noOfWaypoints == 1:
+		d.CurrentLocation = d.Waypoint[0]
+		d.Waypoint = d.Waypoint[:0]
+	case noOfWaypoints == 0:
+		// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
+		if d.Status == Roaming || d.Status == Matching || d.Status == Allocating {
+			fmt.Printf("[Driver %d] Go random location\n", d.Id)
+			nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
+			d.CurrentLocation = nextLocation
+		}
+	}
 }
 
 func (d *DriverAgent) DriveToNextPoint3() {

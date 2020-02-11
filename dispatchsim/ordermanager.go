@@ -200,7 +200,7 @@ func (om *OrderManager) runOrderDistributer() {
 			for _, v := range om.UpdatedOrders {
 				orderTime := ConvertUnixToTimeStamp(v.RideStartTime) // we use RideStartTime as the start of order
 				if (currentTime.Hour() == orderTime.Hour()) && (currentTime.Minute() == orderTime.Minute()) {
-					fmt.Printf("[OrderDistributor]Order found - Id:%v, Time:%v\n", v.Id, orderTime)
+					fmt.Printf("[OrderDistributor]Order %v sent to environment at time %v\n", v.Id, orderTime)
 					go om.sendOrderToEnvironment(v)
 					sameOrderCount++
 				}
@@ -210,7 +210,7 @@ func (om *OrderManager) runOrderDistributer() {
 				om.UpdatedOrders = om.UpdatedOrders[sameOrderCount:]
 			}
 
-			//fmt.Printf("[OrderDistributor] %v \n", om.UpdatedOrders[0].RideStartTime)
+			//fmt.Printf("[OrderDistributor] No of orders left in simulation: %v\n", len(om.UpdatedOrders))
 		}
 	}
 }

@@ -24,6 +24,7 @@ type Simulation struct {
 	UpdateMapSpeed       time.Duration // settings
 	DispatcherSpeed      time.Duration
 	UpdateStatsSpeed     time.Duration
+	TickerTime           time.Duration
 	Ticker               <-chan time.Time
 	SimulationTime       time.Time
 	TaskParameters       TaskParametersFormat
@@ -45,6 +46,8 @@ func SetupSimulation() Simulation {
 		SimilarReputation: 0.5,
 	}
 
+	tickerTime := time.Duration(20) // make it adjustable
+
 	return Simulation{
 		isRunning:            false,
 		Environments:         make(map[int]*Environment),
@@ -59,7 +62,8 @@ func SetupSimulation() Simulation {
 		UpdateMapSpeed:       500,  // update speed to mapbox
 		DispatcherSpeed:      5000,
 		UpdateStatsSpeed:     1000,
-		Ticker:               time.Tick(20 * time.Millisecond),                 // TODO: Make adjustable
+		TickerTime:           tickerTime,
+		Ticker:               time.Tick(tickerTime * time.Millisecond),         // TODO: Make adjustable - 20 millisecond -> increase by 1 min
 		SimulationTime:       time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local), // TODO: Make adjustable
 		TaskParameters:       defaultTaskParameters,
 		DispatcherParameters: defaultDispatcherParameters,
@@ -80,33 +84,13 @@ func (s *Simulation) Run() {
 		select {
 		case recieveCommand := <-s.Recieve:
 			command := stringToArrayString(recieveCommand)
-			//fmt.Printf("[Sim]%v\n", recieveCommand)
 
 			commandType := command.([]interface{})[0].(float64)
 			switch commandType {
 			case 0: // pause
 				commandTypeLevelTwo := command.([]interface{})[1].(float64)
 				switch commandTypeLevelTwo {
-				case 0:
-				K:
-					for {
-						select {
-						case recieveCommand := <-s.Recieve:
-							command := stringToArrayString(recieveCommand)
-							commandType := command.([]interface{})[0].(float64)
-							//fmt.Printf("[Simulator]Receive %v \n", command)
-							switch commandType {
-							case 0:
-								fmt.Printf("[Simulator]Play\n")
-								break K
-							default:
-								//fmt.Printf("[Simulator]Recieve something when pause %v\n", commandType)
-								s.Recieve <- recieveCommand
-							}
-						default:
-							//fmt.Printf("[Simulator]On Pause\n")
-						}
-					}
+				case 0: // pause
 				case 1: // settings
 					settings := command.([]interface{})[2]
 					byteData, _ := json.Marshal(settings)
@@ -133,37 +117,10 @@ func (s *Simulation) Run() {
 				environmentId++
 				//SendEnvGeoJSON(s) // send polygon to client // TODO: settle this case in client
 			case 2: // drivers
-				commandTypeLevelTwo := command.([]interface{})[1].(float64)
-				eId := int(command.([]interface{})[2].(float64)) // get environmentid from the message
-				dId := int(command.([]interface{})[3].(float64)) // get driverId from the message
-				switch commandTypeLevelTwo {
-				case 0:
-					//fmt.Printf("[Simulator]Recieve random point from client and send to driver\n")
-					sendRandomPointDriver(command, s, eId, dId)
-				case 1:
-					//fmt.Printf("[Simulator]Recieve Intialization from client and send to driver\n")
-					// random start location, random destination, waypoint
-					sendIntializationDriver(command, s, eId, dId)
-				case 2: // waypoint
-					sendWaypointsDriver(command, s, eId, dId)
-				case 3: // generate node
-					sendGenerateResultDriver(command, s, eId, dId)
-				case 4: // driver move
-					sendMoveResultDriver(command, s, eId, dId)
-				case 5: // random destination and waypoint
-					sendRandomDestinationWaypoint(command, s, eId, dId)
-				}
 			case 3: // order distributor
 				commandTypeLevelTwo := command.([]interface{})[1].(float64)
 				switch commandTypeLevelTwo {
 				case 0:
-					//fmt.Printf("accessing 3,0\n")
-					// om := SetupOrderRetrieve(s)
-					// s.OM = &om
-					// go s.StartTimer()
-					// go om.runOrderRetrieve()
-					// go om.runOrderDistributer()
-
 					if len(s.Environments) > 0 && k == false {
 						k = true
 						go s.StartTimer()
@@ -182,7 +139,6 @@ func (s *Simulation) Run() {
 
 				}
 			}
-		default:
 			//fmt.Println("[Simulation]Running")
 		}
 		//fmt.Println("[Simulation]Running2")
@@ -200,7 +156,7 @@ func (s *Simulation) SendMapData() {
 			if s.UpdateMap && s.isRunning { // send updates when there is Driver Agent available and environment placed
 				SendDriverTaskEnvGeoJSON(s)
 			}
-		default:
+			//default:
 
 		}
 	}
@@ -215,7 +171,7 @@ func (s *Simulation) SendStats() {
 			if s.isRunning {
 				SendDriverStats(s)
 			}
-		default:
+			//default:
 		}
 	}
 }
@@ -589,7 +545,7 @@ func (s *Simulation) SendMessageToClient(message string) {
 func (s *Simulation) StartTimer() {
 	s.isRunning = true
 	for range s.Ticker {
-		s.SimulationTime = s.SimulationTime.Add(5000 * time.Millisecond)
+		s.SimulationTime = s.SimulationTime.Add(5000 * time.Millisecond) // add half a second
 		//fmt.Printf("[Time by StartTimer]%v\n", s.SimulationTime)
 	}
 }

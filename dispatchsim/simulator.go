@@ -46,7 +46,7 @@ func SetupSimulation() Simulation {
 		SimilarReputation: 0.5,
 	}
 
-	tickerTime := time.Duration(20) // make it adjustable
+	tickerTime := time.Duration(100) // make it adjustable
 
 	return Simulation{
 		isRunning:            false,
@@ -124,7 +124,7 @@ func (s *Simulation) Run() {
 					if len(s.Environments) > 0 && k == false {
 						k = true
 						go s.StartTimer()
-						go s.OM.runOrderDistributer()
+						//go s.OM.runOrderDistributer()
 					} else {
 						s.Send <- "[Simulator]Cannot intailize order distributor"
 					}
@@ -135,7 +135,7 @@ func (s *Simulation) Run() {
 					// initializing order retriever
 					om := SetupOrderRetrieve(s)
 					s.OM = &om
-					go om.runOrderRetrieve()
+					go om.runOrderRetrieve2()
 
 				}
 			}
@@ -398,7 +398,7 @@ func SendDriverTaskEnvGeoJSON(s *Simulation) {
 
 		v.TaskMutex.Lock()
 		for _, v2 := range v.Tasks {
-			if (v2.WaitEnd == time.Time{}) {
+			if (v2.WaitEnd == time.Time{} && v2.Valid == true) {
 				feature := Feature{
 					Type: "Feature",
 					Geometry: Geometry{

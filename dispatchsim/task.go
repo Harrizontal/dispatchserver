@@ -1,7 +1,6 @@
 package dispatchsim
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
 	"time"
@@ -21,6 +20,7 @@ type Task struct {
 	Value           int
 	FinalValue      float64
 	Distance        float64
+	Valid           bool // valid -> task is reachable from a driver. invalid -> task is not reachable from 1 or more driver
 }
 
 // generate random start position, end position
@@ -38,14 +38,6 @@ type Task struct {
 // }
 
 func CreateTaskFromOrder(o Order, e *Environment) Task {
-	// min := 1
-	// max := 10
-	// rand.Seed(time.Now().UnixNano())
-	// n := min + rand.Intn(max-min+1)
-	// fmt.Printf("o.Distance: %v\n", o.Distance)
-	// fmt.Printf("S.RatePerKM: %v\n", e.S.RatePerKM)
-	// fmt.Printf("o.Distance*e.S.RatePerKM: %v\n", o.Distance*e.S.RatePerKM)
-	// fmt.Printf("value: %v\n", math.Round(float64(o.Distance*e.S.RatePerKM)*100)/100)
 
 	var taskValue float64 = 0.00
 	// calculate taskvalue
@@ -67,6 +59,7 @@ func CreateTaskFromOrder(o Order, e *Environment) Task {
 		Value:           int(o.Distance), // random value from 1 to 10 (for now... TODO!)
 		FinalValue:      taskValue,
 		Distance:        o.Distance,
+		Valid:           true,
 	}
 
 	return task
@@ -78,15 +71,12 @@ func GenerateRandomValue(min int, max int) int {
 	return n
 }
 
-// TODO: generate rating from 0 to 5
+// Give rating to driver after completed the task
 func (t *Task) ComputeRating(s *Simulation) float64 {
-	// gives rating
-	fmt.Printf("[ComputeRating] %v", s.TaskParameters.ReputationGivenType)
 	switch s.TaskParameters.ReputationGivenType {
 	case "random":
 		return float64(GenerateRandomValue(0, 5))
 	case "fixed":
-		// return 3.00
 		return s.TaskParameters.ReputationValue
 	default:
 		return float64(GenerateRandomValue(0, 5)) // return int

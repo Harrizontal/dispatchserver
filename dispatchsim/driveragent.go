@@ -48,6 +48,8 @@ type DriverAgent struct {
 	Fatigue             float64
 	Regret              float64
 	ChangeDestination   chan string
+	StartDriving        time.Time
+	EndDriving          time.Time
 }
 
 func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulation) {
@@ -61,6 +63,7 @@ func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulatio
 }
 
 func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
+
 	return DriverAgent{
 		S:                 s,
 		E:                 e,
@@ -254,16 +257,13 @@ func (d *DriverAgent) ProcessTask3() {
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = d.E.S.SimulationTime
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
-					//d.ComputeRegret() IMPT! Uncomment if shit gone mad
 					d.DestinationLocation = d.CurrentTask.StartCoordinate
-					// fmt.Printf("[Driver-Process] Order recieve!\n")
 					d.Recieve2 <- 2
 				} else {
 					// send Tasks to TaskQueue
 					d.E.TaskQueue <- d.CurrentTask
 					d.PendingTask = Task{Id: "null", FinalValue: 0.00}
 					d.Status = Roaming
-					// set nil to d.Task
 				}
 				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
 			case Fetching:
@@ -271,7 +271,6 @@ func (d *DriverAgent) ProcessTask3() {
 				reached, ok := d.ReachTaskPosition()
 				if ok == true && reached == true {
 					// driver has arrived at task location
-
 					x := d.E.S.SimulationTime
 					d.CurrentTask.WaitEnd = x
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
@@ -279,15 +278,7 @@ func (d *DriverAgent) ProcessTask3() {
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 					d.Status = Travelling
 					d.DestinationLocation = d.CurrentTask.EndCoordinate
-					// v := [][]float64{}
-					// v = append(v, latLngToSlice(d.CurrentLocation))
-					// v = append(v, latLngToSlice(d.CurrentTask.EndCoordinate))
-					// c := SendFormat{2, 2, DriverInfoFormat{d.E.Id, d.Id, v}}
-
 					d.Recieve2 <- 2
-
-					// d.E.S.Send <- structToString(c)
-					//d.E.S.Send <- "2,2," + strconv.Itoa(d.E.Id) + "," + strconv.Itoa(d.Id) + "," + latLngToString(d.CurrentLocation) + "," + latLngToString(d.CurrentTask.EndPosition) // REMOVE
 				}
 			case Travelling:
 				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
@@ -296,17 +287,14 @@ func (d *DriverAgent) ProcessTask3() {
 					// driver has completed the task
 					x := d.E.S.SimulationTime
 					d.CurrentTask.TaskEnded = x
-					//d.E.Tasks[d.CurrentTask.Id].TaskEnded = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
+					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].TaskEnded = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
+					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 					d.E.FinishQueue <- d.CurrentTask // put into FinishQueue
 					d.CompleteTask()
 					d.ComputeFatigue()
 					d.ComputeMotivation()
 					d.Status = Roaming
-					// fmt.Printf("[Driver %d - Env %d]Completed task %v \n", d.Id, d.CurrentTask.Id, d.E.Id)
-					// fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
 					d.DriveToNextPoint4()
 				}
 			}
@@ -320,16 +308,8 @@ func (d *DriverAgent) ProcessTask3() {
 
 func (d *DriverAgent) Drive3() {
 
-	// initliaze with current, destination, waypoint
-	// fmt.Printf("[Driver %v]Getting waypoints\n", d.Id)
-	// start, end, waypoints := d.S.RN.G_GetStartEndWaypoint()
-	// d.CurrentLocation = start
-	// d.DestinationLocation = end
-	// fmt.Printf("[Driver %v]Waypoints: %v\n", d.Id, len(waypoints))
-	// d.Waypoint = waypoints[1:]
-	// fmt.Printf("[Driver %v]Intializd waypoints\n", d.Id)
-	tick := time.Tick(50 * time.Millisecond)
-	fmt.Printf("[Driver %v]Getting random location\n", d.Id)
+	tick := time.Tick(20 * time.Millisecond)
+	fmt.Printf("[Driver %v]Intializing driver with random location\n", d.Id)
 	start := d.S.RN.G_GetRandomLocation()
 	d.CurrentLocation = start
 	fmt.Printf("[Driver %v]Done\n", d.Id)
@@ -342,7 +322,7 @@ func (d *DriverAgent) Drive3() {
 			case x := <-d.Recieve2:
 				switch x {
 				case 2:
-					fmt.Printf("[Driver %d]Going appointed destination!\n", d.Id)
+					//fmt.Printf("[Driver %d]Going appointed destination!\n", d.Id)
 					start, end, distance, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
 					d.CurrentLocation = start   // no need this
 					d.DestinationLocation = end // no need this
@@ -359,7 +339,7 @@ func (d *DriverAgent) Drive3() {
 						fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
 						panic("waypoint is 0")
 					}
-					fmt.Printf("[Driver %d]Updated current and destination location, and waypoints\n", d.Id)
+					//fmt.Printf("[Driver %d]Updated current and destination location, and waypoints\n", d.Id)
 					break K
 				}
 			default:
@@ -368,35 +348,11 @@ func (d *DriverAgent) Drive3() {
 
 		}
 	}
-
-	return
-	// for {
-	// 	select {
-	// 	case <-tick:
-	// 	K:
-	// 		select {
-	// 		case x := <-d.Recieve2:
-	// 			switch x {
-	// 			case 2:
-	// 				fmt.Printf("[Driver %d]Going appointed destination!\n", d.Id)
-	// 				start, end, _, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
-	// 				d.CurrentLocation = start   // no need this
-	// 				d.DestinationLocation = end // no need this
-	// 				d.Waypoint = waypoints[1:]
-	// 				break K
-	// 			}
-	// 		default:
-	// 			// fmt.Printf("Driving \n")
-	// 			d.DriveToNextPoint3()
-	// 		}
-	// 	}
-	// }
-
-	panic("[Driver]Drive Ended\n")
+	panic("[Driver]unreachable\n")
 }
 
 func (d *DriverAgent) DriveToNextPoint4() {
-	fmt.Printf("[Driver %d] DriveToNextPoint\n", d.Id)
+	//fmt.Printf("[Driver %d] DriveToNextPoint\n", d.Id)
 	switch noOfWaypoints := len(d.Waypoint); {
 	case noOfWaypoints >= 2:
 		d.CurrentLocation = d.Waypoint[0]
@@ -407,9 +363,17 @@ func (d *DriverAgent) DriveToNextPoint4() {
 	case noOfWaypoints == 0:
 		// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
 		if d.Status == Roaming || d.Status == Matching || d.Status == Allocating {
-			fmt.Printf("[Driver %d] Go random location\n", d.Id)
+			//fmt.Printf("[Driver %d] Go random location\n", d.Id)
 			nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
 			d.CurrentLocation = nextLocation
+
+			// start, end, waypoints := d.S.RN.G_GetEndWaypoint(d.CurrentLocation)
+			// fmt.Printf("[Driver %v]Sending Random Waypoints: %v\n", d.Id, len(waypoints))
+			// d.CurrentLocation = start
+			// d.DestinationLocation = end
+			// if len(waypoints) > 1 {
+			// 	d.Waypoint = waypoints[1:]
+			// }
 		}
 	}
 }
@@ -664,7 +628,7 @@ func (d *DriverAgent) ReachTaskDestination() (bool, bool) {
 func (d *DriverAgent) CompleteTask() (bool, bool) {
 
 	getRating := d.CurrentTask.ComputeRating(d.S)
-	fmt.Printf("[CompleteTask]Task %v with value of %d gave Driver %d a rating of %f \n", d.CurrentTask.Id, d.CurrentTask.Value, d.Id, getRating)
+	//fmt.Printf("[CompleteTask]Task %v with value of %d gave Driver %d a rating of %f \n", d.CurrentTask.Id, d.CurrentTask.Value, d.Id, getRating)
 
 	var updatedRating float64 = 0
 	// if d.TasksCompleted > 0 {

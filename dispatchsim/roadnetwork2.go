@@ -97,12 +97,12 @@ func SetupRoadNetwork2() *RoadNetwork {
 	// x := LatLng{Lat: 30.6796886, Lng: 104.0505911}
 	// rn.G_GetNextPoint(x)
 
-	s := LatLng{Lat: 30.6226523, Lng: 104.0678893}
-	s2 := LatLng{Lat: 30.6226523, Lng: 104.0678893}
-	// e := LatLng{Lat: 30.6795686, Lng: 104.094215}
+	// s := LatLng{Lat: 30.6226523, Lng: 104.0678893}
+	// s2 := LatLng{Lat: 30.6226523, Lng: 104.0678893}
+	// // e := LatLng{Lat: 30.6795686, Lng: 104.094215}
 
-	start, end, distance, waypoints := rn.G_GetWaypoint(s, s2)
-	fmt.Printf("%v %v %v %v", start, end, distance, waypoints)
+	// start, end, distance, waypoints := rn.G_GetWaypoint(s, s2)
+	// fmt.Printf("%v %v %v %v", start, end, distance, waypoints)
 	return rn
 }
 

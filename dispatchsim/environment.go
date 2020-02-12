@@ -41,7 +41,7 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 		NoOfIntialDrivers: noOfDrivers,
 		Tasks:             make(map[string]*Task), // id -> task
 		TaskMutex:         sync.RWMutex{},
-		TaskQueue:         make(chan Task, 10000),
+		TaskQueue:         make(chan Task, 500000),
 		FinishQueue:       make(chan Task, 10000),
 		TotalTasks:        0,
 		MasterSpeed:       100,
@@ -59,48 +59,12 @@ func (e *Environment) GiveTask(o Order) {
 	e.TaskMutex.Unlock()
 }
 
-// generate new drivers
-//TODO: how to get last index no...?
-// func (e *Environment) GenerateDriver(name string, id int) {
-// 	//e.DriverAgents = append(e.DriverAgents, CreateDriver(id, e))
-// 	if _, ok := e.DriverAgents[id]; !ok {
-// 		driver := CreateDriver(id, e)
-// 		e.DriverAgents[id] = &driver
-// 	} else {
-// 		log.Fatal("Driver exists!")
-// 	}
-
-// }
-
 func (e *Environment) Run() {
 
 	dis := SetupDispatcher(e)
 	e.Dispatcher = &dis
-	go dis.dispatcher(e)
+	go dis.dispatcher2(e)
 
-}
-
-func (e *Environment) Stats() {
-	fmt.Println("Stats:")
-	// for k, v := range e.DriverAgents {
-	// 	fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f, Ranking Index: %f\n",
-	// 		k,
-	// 		v.TasksCompleted,
-	// 		v.Reputation,
-	// 		v.Fatigue,
-	// 		v.Motivation,
-	// 		v.Regret,
-	// 		v.GetRankingIndex())
-	// }
-	// for i := 0; i < len(e.DriverAgents); i++ {
-	// 	fmt.Printf("Driver %d's Stats - TasksCompleted: %d, Reputation: %f, Fatigue: %f, Motivation %f, Regret %f\n",
-	// 		i,
-	// 		e.DriverAgents[i].TasksCompleted,
-	// 		e.DriverAgents[i].Reputation,
-	// 		e.DriverAgents[i].Fatigue,
-	// 		e.DriverAgents[i].Motivation,
-	// 		e.DriverAgents[i].Regret)
-	// }
 }
 
 // compute average value of orders with similiar rating

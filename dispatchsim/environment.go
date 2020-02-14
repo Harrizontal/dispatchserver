@@ -3,6 +3,7 @@ package dispatchsim
 import (
 	"fmt"
 	"math"
+	"strconv"
 	"sync"
 	"time"
 
@@ -20,12 +21,14 @@ type Environment struct {
 	DriverAgentMutex  sync.RWMutex
 	NoOfIntialDrivers int
 	Tasks             map[string]*Task // store all tasks
+	TasksTimeline     []Task
 	TaskMutex         sync.RWMutex
 	TaskQueue         chan Task
 	FinishQueue       chan Task
 	TotalTasks        int
 	MasterSpeed       time.Duration
 	Quit              chan struct{}
+	IsDistributing    bool
 	WaitGroup         *sync.WaitGroup // for ending simulation
 }
 
@@ -40,12 +43,14 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 		DriverAgentMutex:  sync.RWMutex{},
 		NoOfIntialDrivers: noOfDrivers,
 		Tasks:             make(map[string]*Task), // id -> task
+		TasksTimeline:     make([]Task, 0),
 		TaskMutex:         sync.RWMutex{},
 		TaskQueue:         make(chan Task, 500000),
 		FinishQueue:       make(chan Task, 10000),
 		TotalTasks:        0,
 		MasterSpeed:       100,
 		Quit:              make(chan struct{}), // for stopping dispatcher and drivers
+		IsDistributing:    false,
 	}
 }
 
@@ -54,17 +59,53 @@ func (e *Environment) GiveTask(o Order) {
 	task := CreateTaskFromOrder(o, e)
 	fmt.Printf("[Environment %d]New Task Generated! - Task %v \n", e.Id, task.Id)
 	e.TaskQueue <- task
-	e.TaskMutex.Lock()
+	//e.TaskMutex.Lock()
 	e.Tasks[task.Id] = &task
-	e.TaskMutex.Unlock()
+	//e.TaskMutex.Unlock()
 }
 
 func (e *Environment) Run() {
 
 	dis := SetupDispatcher(e)
 	e.Dispatcher = &dis
-	go dis.dispatcher2(e)
+	go dis.dispatcher3(e)
+	go e.RunTasksDistributor()
+}
 
+// TODO: Do multiple days.
+func (e *Environment) RunTasksDistributor() {
+	fmt.Printf("[TasksDistributor %v]Awaiting to start\n", e.Id)
+	<-e.S.StartDispatchers
+	fmt.Printf("[TasksDistributor %v]Started\n", e.Id)
+	for range e.S.Ticker {
+		//fmt.Printf("[TasksDistributor %v]Time: %v\n", e.Id, e.S.SimulationTime)
+		currentTime := e.S.SimulationTime
+		sameOrderCount := 0
+	F:
+		for _, v := range e.TasksTimeline {
+			time := ConvertUnixToTimeStamp(v.RideStartTime) // we use RideStartTime as the start of order
+			e.S.SendMessageToClient("Next order is at " + strconv.Itoa(time.Hour()) + ":" + strconv.Itoa(time.Minute()))
+			//fmt.Printf("[TasksDistributor %v]Task %v time %v , hour:%v, minute:%v, c.hour:%v ,c.minute:%v\n", e.Id, v.Id, time, time.Hour(), time.Minute(), currentTime.Hour(), currentTime.Minute())
+			if (currentTime.Hour() == time.Hour()) && (currentTime.Minute() == time.Minute()) {
+				e.IsDistributing = true
+				//fmt.Printf("[TasksDistributor %v]Task %v sent to environment at time %v\n", e.Id, v.Id, time)
+				e.Tasks[v.Id].Appear = true // appear on the map
+				e.TaskQueue <- v            // push task to queue
+				sameOrderCount++
+			} else {
+				break F
+			}
+		}
+		if sameOrderCount > 0 {
+			e.TasksTimeline = e.TasksTimeline[sameOrderCount:]
+		}
+		e.IsDistributing = false
+
+		if len(e.TasksTimeline) == 0 {
+			fmt.Printf("[TasksDistributor %v]Finish distributing task to environment\n", e.Id)
+			return
+		}
+	}
 }
 
 // compute average value of orders with similiar rating

@@ -25,7 +25,7 @@ func SetupDispatcher(e *Environment) Dispatcher {
 		Response:             make(chan DriverMatchingResult, 10000),
 		DriverAgents:         make(map[int]*DriverAgent),
 		DriverAgentsResponse: make(map[int]int),
-		MatchingLimit:        40,
+		MatchingLimit:        500,
 		MatchingDrivers:      make(chan DriverAgent, 1000),
 		RejectedDrivers:      make(chan DriverAgent, 1000),
 		MatchingTasks:        make(chan Task, 1000),
@@ -38,15 +38,116 @@ type DriverMatchingResult struct {
 	Id     int
 }
 
-func (dis *Dispatcher) dispatcher2(e *Environment) {
+func (dis *Dispatcher) dispatcher3(e *Environment) {
+	fmt.Printf("[Dispatcher %d]Awaiting to start\n", e.Id)
+	<-dis.E.S.StartDispatchers
+	fmt.Printf("[Dispatcher %d]Started\n", e.Id)
 	ticker := time.Tick(500 * time.Millisecond)
 	for {
 	K:
 		select {
 		case <-ticker:
-			if dis.E.S.OM.IsDistributing {
+			//fmt.Printf("[>Dispatcher]Started %v\n", dis.NoOfTaskTaken)
+
+			// get tasks from environment
+			tasks := dis.GetValuableTasks2(e.TaskQueue, dis.MatchingLimit)
+
+			if len(tasks) == 0 {
 				break K
 			}
+
+			roamingDrivers := make([]*DriverAgent, 0)
+
+			// get all roaming drivers
+			e.DriverAgentMutex.Lock()
+			mmRepFat := e.S.GetMinMaxReputationFatigue()
+			for _, v := range e.DriverAgents {
+				if v.Status == Roaming && v.Valid {
+					roamingDrivers = append(roamingDrivers, v)
+					v.Status = Allocating // change roaming to allocating to prevent double task allocation when migrating
+				}
+			}
+			e.DriverAgentMutex.Unlock()
+
+			noOfRoamingDrivers := len(roamingDrivers)
+
+			// sort drivers according to ranking index
+			sort.SliceStable(roamingDrivers, func(i, j int) bool {
+				return roamingDrivers[i].GetRankingIndex(&mmRepFat) > roamingDrivers[j].GetRankingIndex(&mmRepFat)
+			})
+
+			noOfTasks := len(tasks)
+
+			//fmt.Printf("[Dispatcher]Intial - Drivers:%v, Tasks:%v\n", noOfRoamingDrivers, noOfTasks)
+			if noOfTasks > noOfRoamingDrivers {
+
+				// cut tasks
+				extraTasks := tasks[noOfRoamingDrivers:]
+				tasks = tasks[:noOfRoamingDrivers]
+				//fmt.Printf("[Dispatcher]tasks>drivers - Drivers:%v, Tasks:%v\n", len(noOfRoamingDrivers), len(tasks))
+				go func() {
+					// we need to push away the task back to queue (goroutine)
+					for i := 0; i < len(extraTasks); i++ {
+						e.TaskQueue <- extraTasks[i]
+						dis.NoOfTaskTaken--
+					}
+				}()
+			} else if noOfTasks < noOfRoamingDrivers {
+
+				// cut drivers
+				extraDrivers := roamingDrivers[noOfTasks:]
+				roamingDrivers = roamingDrivers[:noOfTasks]
+
+				go func() {
+					// we need to push the drivers to roaming
+					for i := 0; i < len(extraDrivers); i++ {
+						extraDrivers[i].Status = Roaming
+					}
+				}()
+			}
+
+			noOfRoamingDrivers = len(roamingDrivers)
+			noOfTasks = len(tasks)
+			//fmt.Printf("[Dispatcher]Left - Drivers:%v, Tasks:%v\n", noOfRoamingDrivers, noOfTasks)
+
+			if noOfTasks != noOfRoamingDrivers {
+				panic("NOT EQUAL!")
+			}
+
+			go func() {
+				for d := 0; d < noOfRoamingDrivers; d++ {
+					_, _, distance, _ := dis.E.S.RN.G_GetWaypoint(roamingDrivers[d].CurrentLocation, tasks[d].StartCoordinate)
+					if distance != math.Inf(1) {
+						//fmt.Printf("[Dispatcher]Task %v to Driver %d with status of %v\n", tasks[d].Id, roamingDrivers[d].Id, roamingDrivers[d].Status)
+						roamingDrivers[d].Request <- Message{Task: tasks[d]}
+						//fmt.Printf("[Dispatcher](Done)Task %v to Driver %d\n", tasks[d].Id, roamingDrivers[d].Id)
+					} else {
+						//fmt.Printf("[Dispatcher]Task %v to Driver %d (rejected)\n", tasks[d].Id, roamingDrivers[d].Id)
+						roamingDrivers[d].Valid = false // turn valid to false for driver, - this driver is in an island
+						e.TaskQueue <- tasks[d]
+						dis.NoOfTaskTaken--
+						//fmt.Printf("[Dispatcher](done)Task %v to Driver %d (rejected)\n", tasks[d].Id, roamingDrivers[d].Id)
+					}
+				}
+				fmt.Printf("[<Dispatcher]Ended\n")
+			}()
+
+		}
+	}
+
+	panic("unreachable")
+}
+
+// This dispatcher caters to island drivers
+func (dis *Dispatcher) dispatcher2(e *Environment) {
+	ticker := time.Tick(500 * time.Millisecond)
+	for {
+		//K:
+		select {
+		case <-ticker:
+			// if dis.E.S.OM.IsDistributing {
+			// 	break K
+			// }
 			fmt.Printf("[>Dispatcher]Started %v\n", dis.NoOfTaskTaken)
 			noOfRoamingDrivers := 0
 			roamingDrivers := make([]*DriverAgent, 0)
@@ -412,13 +513,14 @@ K:
 
 // Get k number of tasks ranking by the value.
 func (dis *Dispatcher) GetValuableTasks(k int, TaskQueue chan Task, limit int) []Task {
+	fmt.Printf("[GetValuableTasks] Getting tasks (%v,%v)\n", k, limit)
 	tasks := make([]Task, 0)
 
 K:
 	// Grabs all tasks from the TaskQueue
 	for {
 		// Grab all tasks then break.
-		if len(tasks) == limit { // TODO: Set toggle max value when choosing list of valuable tasks
+		if len(tasks) == limit || len(tasks) == k { // TODO: Set toggle max value when choosing list of valuable tasks
 			break
 		}
 		select {
@@ -445,8 +547,43 @@ K:
 			TaskQueue <- tasks[k:][i]
 			dis.NoOfTaskTaken--
 		}
+		fmt.Printf("[GetValuableTasks]Finish getting tasks\n")
 		return tasks[:k]
 	}
+
+	fmt.Printf("[GetValuableTasks]Finish getting tasks\n")
+	return tasks
+
+}
+
+func (dis *Dispatcher) GetValuableTasks2(TaskQueue chan Task, limit int) []Task {
+	//fmt.Printf("[GetValuableTasks2]Getting tasks (Limit:%v)\n", limit)
+	tasks := make([]Task, 0)
+
+K:
+	// Grabs all tasks from the TaskQueue
+	for {
+		// Grab all tasks then break.
+		if len(tasks) == limit { // TODO: Set toggle max value when choosing list of valuable tasks
+			break K
+		}
+		select {
+		case x := <-TaskQueue:
+			//fmt.Printf("[GetValuableTasks2]Get Task %v from queue\n", x.Id)
+			tasks = append(tasks, x)
+			dis.NoOfTaskTaken++
+		default:
+			// if no more tasks in channel, break.
+			break K
+		}
+	}
+
+	// sort the tasks' value in descending order
+	sort.SliceStable(tasks, func(i, j int) bool {
+		return tasks[i].FinalValue > tasks[j].FinalValue
+	})
+
+	fmt.Printf("[GetValuableTasks2]Finish getting tasks - %v\n", len(tasks))
 	return tasks
 
 }

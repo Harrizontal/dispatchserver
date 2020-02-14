@@ -107,7 +107,12 @@ func SetupRoadNetwork2() *RoadNetwork {
 }
 
 func (rn *RoadNetwork) G_ProcessJSONFile() {
-	jsonFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/chengdu_3_osm.json")
+	path, err := os.Getwd()
+	if err != nil {
+		log.Println(err)
+	}
+	fmt.Printf("Current Working Directory: %v\n", path)
+	jsonFile, err := os.Open("src/github.com/harrizontal/dispatchserver/assets/chengdu_3_osm.json")
 	// if we os.Open returns an error then handle it
 	if err != nil {
 		log.Fatal(err)

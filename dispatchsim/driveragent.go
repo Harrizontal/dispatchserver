@@ -50,6 +50,7 @@ type DriverAgent struct {
 	ChangeDestination   chan string
 	StartDriving        time.Time
 	EndDriving          time.Time
+	Valid               bool
 }
 
 func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulation) {
@@ -60,6 +61,7 @@ func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulatio
 		go e.DriverAgents[startingDriverId].ProcessTask3()
 		startingDriverId++
 	}
+	fmt.Printf("[Environment %d]%v drivers spawned\n", e.Id, n)
 }
 
 func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
@@ -83,110 +85,8 @@ func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
 		Fatigue:           0,
 		Regret:            0,
 		ChangeDestination: make(chan string),
+		Valid:             true,
 	}
-}
-
-func (d *DriverAgent) ProcessTask2() {
-	go d.Drive()
-	//go d.RunComputeRegret()
-
-	tick := time.Tick(d.E.S.MasterSpeed * time.Millisecond)
-	for {
-		select {
-		case <-d.E.Quit:
-			//fmt.Println("Driver " + strconv.Itoa(d.Id) + " ended his day")
-			return
-		case <-tick:
-
-			switch d.Status {
-			case Roaming:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-			case Allocating:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-				select {
-				case t := <-d.Request:
-					// fmt.Printf("Task address @ during matching: %p\n", &t)
-					if t.Task.Id != "-1" {
-						d.Status = Matching
-						d.PendingTask = t.Task
-						d.CurrentTask = t.Task
-						//fmt.Printf("Driver %d got Task %v! \n", d.Id, t.Task.Id)
-					} else {
-						d.Status = Roaming
-						//fmt.Printf("Driver %d did not get any tasks \n", d.Id)
-					}
-				default:
-
-				}
-			case Matching:
-				if d.AcceptRide() == true {
-					d.CurrentTask = d.PendingTask
-					d.PendingTask = Task{Id: "null", FinalValue: 0.00} // bad way...
-					d.Status = Fetching
-					// uncomment the below one line code if shit gone mad
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].Dispatcher.Response <- DriverMatchingResult{Accept: true, Id: d.Id}
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = d.E.S.SimulationTime
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
-					//d.ComputeRegret() IMPT! Uncomment if shit gone mad
-					d.DestinationLocation = d.CurrentTask.StartCoordinate
-					d.ChangeDestination <- "change message"
-				} else {
-					// send Tasks to TaskQueue
-					d.E.TaskQueue <- d.CurrentTask
-					d.PendingTask = Task{Id: "null", FinalValue: 0.00}
-					d.Status = Roaming
-					// set nil to d.Task
-				}
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-			case Fetching:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-				reached, ok := d.ReachTaskPosition()
-				if ok == true && reached == true {
-					//fmt.Printf("Driver %d has reached the passenger \n", d.Id)
-					// driver has arrived at task location
-
-					x := d.E.S.SimulationTime
-					d.CurrentTask.WaitEnd = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitEnd = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
-					d.Status = Travelling
-					d.DestinationLocation = d.CurrentTask.EndCoordinate
-					v := [][]float64{}
-					v = append(v, latLngToSlice(d.CurrentLocation))
-					v = append(v, latLngToSlice(d.CurrentTask.EndCoordinate))
-					c := SendFormat{2, 2, DriverInfoFormat{d.E.Id, d.Id, v}}
-					d.E.S.Send <- structToString(c)
-					//d.E.S.Send <- "2,2," + strconv.Itoa(d.E.Id) + "," + strconv.Itoa(d.Id) + "," + latLngToString(d.CurrentLocation) + "," + latLngToString(d.CurrentTask.EndPosition) // REMOVE
-				}
-			case Travelling:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-				reached, ok := d.ReachTaskDestination()
-				if ok == true && reached == true {
-					// driver has completed the task
-					x := d.E.S.SimulationTime
-					d.CurrentTask.TaskEnded = x
-					//d.E.Tasks[d.CurrentTask.Id].TaskEnded = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].TaskEnded = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
-					d.E.FinishQueue <- d.CurrentTask // put into FinishQueue
-					d.CompleteTask()
-					d.ComputeFatigue()
-					d.ComputeMotivation()
-					d.Status = Roaming
-					// fmt.Printf("[Driver %d - Env %d]Completed task %v \n", d.Id, d.CurrentTask.Id, d.E.Id)
-					// fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
-					d.DriveToNextPoint()
-				}
-			}
-			// migrate to another environment
-			d.Migrate()
-		}
-	}
-	// fmt.Printf("[Driver %d - Env %d]Driver agent function finished\n", d.Id, d.E.Id)
-	log.Fatalf("[Driver %d] Ended", d.Id)
 }
 
 func (d *DriverAgent) Migrate() bool {
@@ -216,6 +116,7 @@ func (d *DriverAgent) Migrate() bool {
 }
 
 func (d *DriverAgent) ProcessTask3() {
+	<-d.S.StartDrivers // close(StartDrivers) to start this function
 	go d.Drive3()
 	//go d.RunComputeRegret()
 
@@ -254,9 +155,9 @@ func (d *DriverAgent) ProcessTask3() {
 					d.Status = Fetching
 					// uncomment the below one line code if shit gone mad
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Dispatcher.Response <- DriverMatchingResult{Accept: true, Id: d.Id}
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
+					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = d.E.S.SimulationTime
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
+					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 					d.DestinationLocation = d.CurrentTask.StartCoordinate
 					d.Recieve2 <- 2
 				} else {
@@ -273,9 +174,11 @@ func (d *DriverAgent) ProcessTask3() {
 					// driver has arrived at task location
 					x := d.E.S.SimulationTime
 					d.CurrentTask.WaitEnd = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
+
+					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitEnd = x
-					d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
+					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
+
 					d.Status = Travelling
 					d.DestinationLocation = d.CurrentTask.EndCoordinate
 					d.Recieve2 <- 2
@@ -287,9 +190,11 @@ func (d *DriverAgent) ProcessTask3() {
 					// driver has completed the task
 					x := d.E.S.SimulationTime
 					d.CurrentTask.TaskEnded = x
+
 					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].TaskEnded = x
 					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
+
 					d.E.FinishQueue <- d.CurrentTask // put into FinishQueue
 					d.CompleteTask()
 					d.ComputeFatigue()
@@ -309,10 +214,10 @@ func (d *DriverAgent) ProcessTask3() {
 func (d *DriverAgent) Drive3() {
 
 	tick := time.Tick(20 * time.Millisecond)
-	fmt.Printf("[Driver %v]Intializing driver with random location\n", d.Id)
+	//fmt.Printf("[Driver %v]Intializing driver with random location\n", d.Id)
 	start := d.S.RN.G_GetRandomLocation()
 	d.CurrentLocation = start
-	fmt.Printf("[Driver %v]Done\n", d.Id)
+	//fmt.Printf("[Driver %v]Done\n", d.Id)
 
 	for {
 	K:
@@ -378,215 +283,11 @@ func (d *DriverAgent) DriveToNextPoint4() {
 	}
 }
 
-func (d *DriverAgent) DriveToNextPoint3() {
-
-	select {
-	case waypoints := <-d.RecieveNewRoute:
-		//fmt.Printf("New route\n")
-		if d.Status == Roaming && d.RequestNewRoute == true {
-			fmt.Printf("[Driver %d]Recieve new route when roaming! New Waypoints: %v\n", d.Id, len(waypoints))
-			d.CurrentLocation = waypoints[0]
-			d.DestinationLocation = waypoints[len(waypoints)-1]
-			d.Waypoint = waypoints[1:]
-		}
-		d.RequestNewRoute = false
-
-	default:
-		//fmt.Printf("Waypoint left: %v\n", len(d.Waypoint))
-		switch noOfWaypoints := len(d.Waypoint); {
-		case noOfWaypoints >= 2:
-			d.CurrentLocation = d.Waypoint[0]
-			d.Waypoint = d.Waypoint[1:]
-			time.Sleep(50 * time.Millisecond)
-		case noOfWaypoints == 1:
-			d.CurrentLocation = d.Waypoint[0]
-			time.Sleep(50 * time.Millisecond)
-			d.Waypoint = d.Waypoint[:0]
-		case noOfWaypoints == 0:
-			if d.RequestNewRoute == false {
-				d.RequestNewRoute = true
-				go d.DriveRandom()
-			}
-			// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
-			nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
-			d.CurrentLocation = nextLocation
-			time.Sleep(50 * time.Millisecond)
-		}
-	}
-	// switch noOfWaypoints := len(d.Waypoint); {
-	// case noOfWaypoints >= 2:
-	// 	d.CurrentLocation = d.Waypoint[0]
-	// 	d.Waypoint = d.Waypoint[1:]
-	// 	time.Sleep(50 * time.Millisecond)
-	// case noOfWaypoints == 1:
-	// 	d.CurrentLocation = d.Waypoint[0]
-	// 	time.Sleep(50 * time.Millisecond)
-	// 	d.Waypoint = d.Waypoint[:0]
-	// case noOfWaypoints == 0:
-
-	// if d.Status == Roaming || d.Status == Allocating || d.Status == Matching {
-	// 	fmt.Printf("[Driver %v]Getting new waypoints (RAM)\n", d.Id)
-	// 	start, end, waypoints := d.S.RN.G_GetEndWaypoint(d.CurrentLocation)
-	// 	d.CurrentLocation = start
-	// 	d.DestinationLocation = end
-	// 	d.Waypoint = waypoints[1:]
-	// }
-
-	// if d.Status == Fetching {
-	// 	fmt.Printf("[Driver %v]Getting new waypoints (fetching)\n", d.Id)
-	// 	start, end, _, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.CurrentTask.StartCoordinate)
-	// 	d.CurrentLocation = start
-	// 	d.DestinationLocation = end
-	// 	d.Waypoint = waypoints[1:]
-	// }
-
-	// if d.Status == Travelling {
-	// 	fmt.Printf("[Driver %v]Getting new waypoints (travelling)\n", d.Id)
-	// 	start, end, _, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.CurrentTask.EndCoordinate)
-	// 	d.CurrentLocation = start
-	// 	d.DestinationLocation = end
-	// 	d.Waypoint = waypoints[1:]
-	//}
-
-	// nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
-	// d.CurrentLocation = nextLocation
-	//}
-}
-
 func (d *DriverAgent) DriveRandom() {
 	_, _, waypoints := d.S.RN.G_GetEndWaypoint(d.CurrentLocation)
 	// d.Waypoint = waypoints
 	fmt.Printf("[Driver %v]Sending Random Waypoints: %v\n", d.Id, len(waypoints))
 	d.RecieveNewRoute <- waypoints
-}
-
-func (d *DriverAgent) Drive() {
-	//1. Setting up start, destination and waypoint
-	//d.E.S.Send <- "2,1," + strconv.Itoa(d.E.Id) + "," + strconv.Itoa(d.Id) // REMOVE!
-	c := SendFormat{2, 1, DriverInfoFormat{d.E.Id, d.Id, [][]float64{}}}
-	d.E.S.Send <- structToString(c)
-	fmt.Printf("[Driver] 0\n")
-	var generatedNode bool = false
-	for {
-		select {
-		case <-d.E.Quit:
-			return
-		case x := <-d.Recieve:
-			switch x.CommandSecondType {
-			case 0: // NO USE CASE FOR THIS YET
-				//fmt.Printf("[Driver %d - Env %d]Saving random point (lat:%f,lng:%f) to current location \n", d.Id, x.LatLng.Lat, x.LatLng.Lng, d.E.Id)
-			case 1:
-				fmt.Printf("[Driver] 1\n")
-				//fmt.Printf("[Driver %d - Env %d]Intialization of Driver\n", d.Id, d.E.Id)
-				//1b. Recieve random current location, destination location and waypoint
-				d.CurrentLocation = x.StartDestinationWaypoint.StartLocation
-				d.DestinationLocation = x.StartDestinationWaypoint.DestinationLocation
-				d.Waypoint = x.StartDestinationWaypoint.Waypoint[1:]
-
-				if generatedNode == false {
-					// 2. generate node
-					v := [][]float64{}
-					v = append(v, latLngToSlice(d.CurrentLocation))
-					c := SendFormat{2, 3, DriverInfoFormat{d.E.Id, d.Id, v}}
-					d.E.S.Send <- structToString(c)
-					//d.E.S.Send <- "2,3," + strconv.Itoa(d.E.Id) + "," + strconv.Itoa(d.Id) + "," + latLngToString(d.CurrentLocation) // REMOVE
-				}
-
-			case 2:
-				fmt.Printf("[Driver] 2\n")
-				//fmt.Printf("[Driver %d - Env %d]Setting waypoint\n", d.Id, d.E.Id)
-				// Waypoint must be more than 1. If is exactly 1, it means the driver and passenger is exactly on the same node
-				if len(x.Waypoint) > 1 {
-					d.NextLocation, d.Waypoint = x.Waypoint[1], x.Waypoint[1:]
-					v := [][]float64{}
-					v = append(v, latLngToSlice(d.CurrentLocation))
-					v = append(v, latLngToSlice(d.NextLocation))
-					//c := SendFormat{2, 4, DriverInfoFormat{d.E.Id, d.Id, v}}
-					time.Sleep(200 * time.Millisecond)
-					result := fmt.Sprintf("[2,4,%v,%v,[%v,%v]]", d.E.Id, d.Id, d.NextLocation.Lat, d.NextLocation.Lng)
-					//d.E.S.Send <- structToString(c)
-					d.E.S.Recieve <- result
-				}
-
-			case 3:
-				fmt.Printf("[Driver] 3\n")
-				if x.Success == true {
-					//fmt.Printf("[Driver %d - Env %d]Node generated\n", d.Id, d.E.Id)
-					generatedNode = true
-					d.DriveToNextPoint()
-				}
-			case 4:
-				fmt.Printf("[Driver] 4\n")
-				if x.Success == true {
-					//fmt.Printf("[Driver %d - Env %d]Driver moved successfully\n", d.Id, d.E.Id)
-					d.CurrentLocation = x.LocationArrived
-					select {
-					case <-d.ChangeDestination:
-						v := [][]float64{}
-						v = append(v, latLngToSlice(d.CurrentLocation))
-						v = append(v, latLngToSlice(d.CurrentTask.StartCoordinate))
-						c := SendFormat{2, 2, DriverInfoFormat{d.E.Id, d.Id, v}}
-						d.E.S.Send <- structToString(c)
-
-					default:
-						d.DriveToNextPoint()
-					}
-
-				}
-			case 5:
-				fmt.Printf("[Driver] 5\n")
-				//fmt.Printf("[Driver %d - Env %d]New random generated\n", d.Id, d.E.Id)
-				d.CurrentLocation = x.StartDestinationWaypoint.StartLocation
-				d.DestinationLocation = x.StartDestinationWaypoint.DestinationLocation
-				d.Waypoint = x.StartDestinationWaypoint.Waypoint[1:]
-				d.DriveToNextPoint()
-			}
-		}
-	}
-	fmt.Printf("[Driver %d - Env %d]Driver function finished\n", d.Id, d.E.Id)
-}
-
-func (d *DriverAgent) DriveToNextPoint() {
-	// e.g [1,1],[2,2],[3,3],[4,4]
-	switch noOfWaypoints := len(d.Waypoint); {
-	case noOfWaypoints >= 2:
-		//fmt.Printf("[Driver %d - Env %d]Driving to next point\n", d.Id, d.E.Id)
-		d.NextLocation = d.Waypoint[0]
-		d.Waypoint = d.Waypoint[1:]
-		v := [][]float64{}
-		v = append(v, latLngToSlice(d.CurrentLocation))
-		v = append(v, latLngToSlice(d.NextLocation))
-		//c := SendFormat{2, 4, DriverInfoFormat{d.E.Id, d.Id, v}}
-		//d.E.S.Send <- structToString(c)
-		time.Sleep(200 * time.Millisecond)
-		result := fmt.Sprintf("[2,4,%v,%v,[%v,%v]]", d.E.Id, d.Id, d.NextLocation.Lat, d.NextLocation.Lng)
-		d.E.S.Recieve <- result
-
-	case noOfWaypoints == 1:
-		//fmt.Printf("[Driver %d - Env %d]Driving to next point\n", d.Id, d.E.Id)
-		d.NextLocation = d.Waypoint[0]
-		v := [][]float64{}
-		v = append(v, latLngToSlice(d.CurrentLocation))
-		v = append(v, latLngToSlice(d.NextLocation))
-		time.Sleep(200 * time.Millisecond)
-		result := fmt.Sprintf("[2,4,%v,%v,[%v,%v]]", d.E.Id, d.Id, d.NextLocation.Lat, d.NextLocation.Lng)
-		d.E.S.Recieve <- result
-		// c := SendFormat{2, 4, DriverInfoFormat{d.E.Id, d.Id, v}}
-		// d.E.S.Send <- structToString(c)
-		d.Waypoint = d.Waypoint[:0]
-	case noOfWaypoints == 0:
-		//fmt.Printf("[Driver %d - Env %d]No more waypoint to drive\n", d.Id, d.E.Id)
-		if d.Status == Roaming || d.Status == Allocating || d.Status == Matching {
-			// Driver has reached the last point of the waypoint
-			// Generate a new random destination and its waypoint
-			v := [][]float64{}
-			v = append(v, latLngToSlice(d.CurrentLocation))
-			c := SendFormat{2, 5, DriverInfoFormat{d.E.Id, d.Id, v}}
-			d.E.S.Send <- structToString(c)
-
-		}
-	}
-
 }
 
 // Accept rate

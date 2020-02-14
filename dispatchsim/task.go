@@ -9,6 +9,7 @@ import (
 type Task struct {
 	Id              string
 	EnvironmentId   int
+	RideStartTime   string
 	StartCoordinate LatLng    // Lat lng from dataset
 	EndCoordinate   LatLng    // Lat lng from dataset
 	PickUpLocation  LatLng    // latlong - start of waypoint
@@ -21,21 +22,8 @@ type Task struct {
 	FinalValue      float64
 	Distance        float64
 	Valid           bool // valid -> task is reachable from a driver. invalid -> task is not reachable from 1 or more driver
+	Appear          bool // only appear when this order aligns with timeline
 }
-
-// generate random start position, end position
-// func CreateTask(id int) Task {
-// 	min := 1
-// 	max := 10
-// 	rand.Seed(time.Now().UnixNano())
-// 	n := min + rand.Intn(max-min+1)
-
-// 	return Task{
-// 		Id:          id,
-// 		TaskCreated: time.Now(),
-// 		Value:       n, // random value from 1 to 10 (for now... TODO!)
-// 	}
-// }
 
 func CreateTaskFromOrder(o Order, e *Environment) Task {
 
@@ -51,6 +39,7 @@ func CreateTaskFromOrder(o Order, e *Environment) Task {
 	task := Task{
 		Id:              o.Id,
 		EnvironmentId:   e.Id,
+		RideStartTime:   o.RideStartTime,
 		StartCoordinate: o.StartCoordinate,
 		EndCoordinate:   o.EndCoordinate,
 		PickUpLocation:  LatLng{Lat: o.PickUpLat, Lng: o.PickUpLng},
@@ -60,6 +49,7 @@ func CreateTaskFromOrder(o Order, e *Environment) Task {
 		FinalValue:      taskValue,
 		Distance:        o.Distance,
 		Valid:           true,
+		Appear:          false,
 	}
 
 	return task

@@ -7,6 +7,8 @@ import (
 	"math"
 	"sync"
 	"time"
+
+	"github.com/pquerna/ffjson/ffjson"
 )
 
 type Simulation struct {
@@ -29,6 +31,8 @@ type Simulation struct {
 	SimulationTime       time.Time
 	TaskParameters       TaskParametersFormat
 	DispatcherParameters DispatcherParametersFormat
+	StartDrivers         chan interface{}
+	StartDispatchers     chan interface{}
 }
 
 func SetupSimulation() Simulation {
@@ -59,7 +63,7 @@ func SetupSimulation() Simulation {
 		Send:                 make(chan string, 10000),
 		OrderQueue:           make(chan Order, 1000),
 		UpdateMap:            true, // set true to update mapbox
-		UpdateMapSpeed:       500,  // update speed to mapbox
+		UpdateMapSpeed:       1000, // update speed to mapbox
 		DispatcherSpeed:      5000,
 		UpdateStatsSpeed:     1000,
 		TickerTime:           tickerTime,
@@ -67,6 +71,8 @@ func SetupSimulation() Simulation {
 		SimulationTime:       time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local), // TODO: Make adjustable
 		TaskParameters:       defaultTaskParameters,
 		DispatcherParameters: defaultDispatcherParameters,
+		StartDrivers:         make(chan interface{}),
+		StartDispatchers:     make(chan interface{}),
 	}
 }
 
@@ -103,11 +109,12 @@ func (s *Simulation) Run() {
 					s.SendMessageToClient("Parameters applied")
 				}
 
-				fmt.Printf("[Simulator]End of case 0\n")
+				fmt.Printf("[Simulator]Parameters applied\n")
 			case 1: // generate environment
 				fmt.Printf("[Simulator]Generate Environment %d \n", environmentId)
 				inputNoOfDrivers := int(command.([]interface{})[1].(float64))
 				latLngs := command.([]interface{})[2].([]interface{})
+
 				noOfDrivers = noOfDrivers + inputNoOfDrivers
 				env := SetupEnvironment(s, environmentId, inputNoOfDrivers, false, false, ConvertToArrayLatLng(latLngs))
 				s.Environments[environmentId] = &env
@@ -115,7 +122,7 @@ func (s *Simulation) Run() {
 				go env.Run()                                                 // run environment
 				startingDriverCount = startingDriverCount + inputNoOfDrivers // update driver id count
 				environmentId++
-				//SendEnvGeoJSON(s) // send polygon to client // TODO: settle this case in client
+				SendEnvGeoJSON(s) // send polygon to client // TODO: settle this case in client
 			case 2: // drivers
 			case 3: // order distributor
 				commandTypeLevelTwo := command.([]interface{})[1].(float64)
@@ -123,6 +130,8 @@ func (s *Simulation) Run() {
 				case 0:
 					if len(s.Environments) > 0 && k == false {
 						k = true
+						close(s.StartDrivers)     // start drivers
+						close(s.StartDispatchers) // start dispatcher
 						go s.StartTimer()
 						//go s.OM.runOrderDistributer()
 					} else {
@@ -130,7 +139,7 @@ func (s *Simulation) Run() {
 					}
 				case 1: // pickup lnglat and drop off lnglat in terms of waypoint
 					//fmt.Printf("accessing 3,1\n")
-					sendCorrectedLocation(command, s)
+					//sendCorrectedLocation(command, s)
 				case 2:
 					// initializing order retriever
 					om := SetupOrderRetrieve(s)
@@ -147,14 +156,15 @@ func (s *Simulation) Run() {
 }
 
 func (s *Simulation) SendMapData() {
-	fmt.Printf("[Simulator]sendMapData started \n")
+	fmt.Printf("[Simulator]SendMapData started \n")
 	tick := time.Tick((s.UpdateMapSpeed) * time.Millisecond)
 	for {
 		select {
 		case <-tick:
 			//fmt.Printf("[Simulator]Sending map data\n")
 			if s.UpdateMap && s.isRunning { // send updates when there is Driver Agent available and environment placed
-				SendDriverTaskEnvGeoJSON(s)
+				go SendDriversGeoJSON(s)
+				go SendTasksJSON(s)
 			}
 			//default:
 
@@ -170,19 +180,12 @@ func (s *Simulation) SendStats() {
 		case <-tick:
 			if s.isRunning {
 				SendDriverStats(s)
+				SendTasksJSON(s)
 			}
 			//default:
 		}
 	}
 }
-
-func (s *Simulation) SetParameters(sf SettingsFormat) {
-
-}
-
-// func (s *Simulation) Run2() {
-// 	SendTimer(s)
-// }
 
 // TODO: Reputation
 func (s *Simulation) ComputeAverageValue(d *DriverAgent) float64 {
@@ -247,104 +250,105 @@ func (s *Simulation) GetMinMaxReputationFatigue() [2][2]float64 {
 	return [2][2]float64{{minReputation, maxReputation}, {minFatigue, maxFatigue}}
 }
 
-// e.g 2,0,{environmentId},{DriverId}
-// THIS METHOD IS UNUSED
-func sendRandomPointDriver(command interface{}, s *Simulation, eId int, dId int) {
-	latLng := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-	s.Environments[eId].DriverAgents[dId].Recieve <- Message{CommandType: 2, CommandSecondType: 0, LatLng: latLng}
-}
+// // e.g 2,0,{environmentId},{DriverId}
+// // THIS METHOD IS UNUSED
+// func sendRandomPointDriver(command interface{}, s *Simulation, eId int, dId int) {
+// 	latLng := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
+// 	s.Environments[eId].DriverAgents[dId].Recieve <- Message{CommandType: 2, CommandSecondType: 0, LatLng: latLng}
+// }
 
-func sendIntializationDriver(command interface{}, s *Simulation, eId int, dId int) {
-	// fmt.Printf("%T %[1]v \n", command.([]interface{})[6].([]interface{}))
-	startLocation := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-	destLocation := ConvertToLatLng(command.([]interface{})[5].([]interface{}))
-	waypoints := ConvertToArrayLatLng(command.([]interface{})[6].([]interface{}))
+// func sendIntializationDriver(command interface{}, s *Simulation, eId int, dId int) {
+// 	// fmt.Printf("%T %[1]v \n", command.([]interface{})[6].([]interface{}))
+// 	startLocation := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
+// 	destLocation := ConvertToLatLng(command.([]interface{})[5].([]interface{}))
+// 	waypoints := ConvertToArrayLatLng(command.([]interface{})[6].([]interface{}))
 
-	message := Message{
-		CommandType:       2,
-		CommandSecondType: 1,
-		StartDestinationWaypoint: StartDestinationWaypoint{
-			StartLocation:       startLocation,
-			DestinationLocation: destLocation,
-			Waypoint:            waypoints,
-		},
-	}
+// 	message := Message{
+// 		CommandType:       2,
+// 		CommandSecondType: 1,
+// 		StartDestinationWaypoint: StartDestinationWaypoint{
+// 			StartLocation:       startLocation,
+// 			DestinationLocation: destLocation,
+// 			Waypoint:            waypoints,
+// 		},
+// 	}
 
-	s.DriverAgents[dId].Recieve <- message
-}
+// 	s.DriverAgents[dId].Recieve <- message
+// }
 
-func sendWaypointsDriver(command interface{}, s *Simulation, eId int, dId int) {
+// func sendWaypointsDriver(command interface{}, s *Simulation, eId int, dId int) {
 
-	message := Message{
-		CommandType:       2,
-		CommandSecondType: 2,
-		Waypoint:          ConvertToArrayLatLng(command.([]interface{})[4].([]interface{})),
-	}
+// 	message := Message{
+// 		CommandType:       2,
+// 		CommandSecondType: 2,
+// 		Waypoint:          ConvertToArrayLatLng(command.([]interface{})[4].([]interface{})),
+// 	}
 
-	s.DriverAgents[dId].Recieve <- message
-}
+// 	s.DriverAgents[dId].Recieve <- message
+// }
 
-func sendGenerateResultDriver(command interface{}, s *Simulation, eId int, dId int) {
-	success := command.([]interface{})[4].(bool)
-	//fmt.Printf("%T %[1]v\n", success)
-	message := Message{
-		CommandType:       2,
-		CommandSecondType: 3,
-		Success:           success,
-	}
+// func sendGenerateResultDriver(command interface{}, s *Simulation, eId int, dId int) {
+// 	success := command.([]interface{})[4].(bool)
+// 	//fmt.Printf("%T %[1]v\n", success)
+// 	message := Message{
+// 		CommandType:       2,
+// 		CommandSecondType: 3,
+// 		Success:           success,
+// 	}
 
-	s.DriverAgents[dId].Recieve <- message
-}
+// 	s.DriverAgents[dId].Recieve <- message
+// }
 
-func sendMoveResultDriver(command interface{}, s *Simulation, eId int, dId int) {
-	location := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-	//fmt.Printf("%T %[1]v\n", success)
-	message := Message{
-		CommandType:       2,
-		CommandSecondType: 4,
-		LocationArrived:   location,
-		Success:           true, //TODO!!! remove this!
-	}
+// func sendMoveResultDriver(command interface{}, s *Simulation, eId int, dId int) {
+// 	location := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
+// 	//fmt.Printf("%T %[1]v\n", success)
+// 	message := Message{
+// 		CommandType:       2,
+// 		CommandSecondType: 4,
+// 		LocationArrived:   location,
+// 		Success:           true, //TODO!!! remove this!
+// 	}
 
-	s.DriverAgents[dId].Recieve <- message
-}
+// 	s.DriverAgents[dId].Recieve <- message
+// }
 
-func sendRandomDestinationWaypoint(command interface{}, s *Simulation, eId int, dId int) {
-	// fmt.Printf("%T %[1]v \n", command.([]interface{})[6].([]interface{}))
-	startLocation := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-	destLocation := ConvertToLatLng(command.([]interface{})[5].([]interface{}))
-	waypoints := ConvertToArrayLatLng(command.([]interface{})[6].([]interface{}))
+// func sendRandomDestinationWaypoint(command interface{}, s *Simulation, eId int, dId int) {
+// 	// fmt.Printf("%T %[1]v \n", command.([]interface{})[6].([]interface{}))
+// 	startLocation := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
+// 	destLocation := ConvertToLatLng(command.([]interface{})[5].([]interface{}))
+// 	waypoints := ConvertToArrayLatLng(command.([]interface{})[6].([]interface{}))
 
-	message := Message{
-		CommandType:       2,
-		CommandSecondType: 5,
-		StartDestinationWaypoint: StartDestinationWaypoint{
-			StartLocation:       startLocation,
-			DestinationLocation: destLocation,
-			Waypoint:            waypoints,
-		},
-	}
+// 	message := Message{
+// 		CommandType:       2,
+// 		CommandSecondType: 5,
+// 		StartDestinationWaypoint: StartDestinationWaypoint{
+// 			StartLocation:       startLocation,
+// 			DestinationLocation: destLocation,
+// 			Waypoint:            waypoints,
+// 		},
+// 	}
 
-	s.DriverAgents[dId].Recieve <- message
-}
+// 	s.DriverAgents[dId].Recieve <- message
+// }
 
-func sendCorrectedLocation(command interface{}, s *Simulation) {
-	pickupLocation := ConvertToLatLng(command.([]interface{})[2].([]interface{}))
-	dropoffLocation := ConvertToLatLng(command.([]interface{})[3].([]interface{}))
-	distance := command.([]interface{})[4].(float64)
+// func sendCorrectedLocation(command interface{}, s *Simulation) {
+// 	pickupLocation := ConvertToLatLng(command.([]interface{})[2].([]interface{}))
+// 	dropoffLocation := ConvertToLatLng(command.([]interface{})[3].([]interface{}))
+// 	distance := command.([]interface{})[4].(float64)
 
-	r := RecieveFormat{
-		Command:       3,
-		CommandSecond: 1,
-		Data: CorrectedLocation{
-			StartCoordinate: pickupLocation,
-			EndCoordinate:   dropoffLocation,
-			Distance:        distance,
-		},
-	}
+// 	r := RecieveFormat{
+// 		Command:       3,
+// 		CommandSecond: 1,
+// 		Data: CorrectedLocation{
+// 			StartCoordinate: pickupLocation,
+// 			EndCoordinate:   dropoffLocation,
+// 			Distance:        distance,
+// 		},
+// 	}
 
-	s.OM.Recieve <- r
-}
+// 	s.OM.Recieve <- r
+// }
+
 func SendEnvGeoJSON(s *Simulation) {
 	geojson := &GeoJSONFormat{
 		Type:     "FeatureCollection",
@@ -365,7 +369,7 @@ func SendEnvGeoJSON(s *Simulation) {
 
 	sendformat := &SendFormat{
 		Command:       1,
-		CommandSecond: 1,
+		CommandSecond: 2,
 		Data:          geojson,
 	}
 
@@ -378,27 +382,16 @@ func SendEnvGeoJSON(s *Simulation) {
 
 }
 
-func SendDriverTaskEnvGeoJSON(s *Simulation) {
+func SendTasksJSON(s *Simulation) {
 	geojson := &GeoJSONFormat{
 		Type:     "FeatureCollection",
 		Features: make([]Feature, 0),
 	}
 
 	for _, v := range s.Environments {
-		// polygon features
-		// feature := Feature{
-		// 	Type: "Feature",
-		// 	Geometry: Geometry2{
-		// 		Type:        "Polygon",
-		// 		Coordinates: twoLatLngtoArrayFloat(v.PolygonLatLng),
-		// 	},
-		// 	Properties: Properties{},
-		// }
-		// geojson.Features = append(geojson.Features, feature)
-
-		v.TaskMutex.Lock()
+		//v.TaskMutex.Lock()
 		for _, v2 := range v.Tasks {
-			if (v2.WaitEnd == time.Time{} && v2.Valid == true) {
+			if (v2.WaitEnd == time.Time{} && v2.Valid == true && v2.Appear == true) {
 				feature := Feature{
 					Type: "Feature",
 					Geometry: Geometry{
@@ -424,8 +417,31 @@ func SendDriverTaskEnvGeoJSON(s *Simulation) {
 			}
 
 		}
-		v.TaskMutex.Unlock()
+		//v.TaskMutex.Unlock()
 	}
+
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 5,
+		Data:          geojson,
+	}
+
+	e, err := ffjson.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	s.Send <- string(e)
+
+}
+
+func SendDriversGeoJSON(s *Simulation) {
+	geojson := &GeoJSONFormat{
+		Type:     "FeatureCollection",
+		Features: make([]Feature, 0),
+	}
+
+	start := time.Now()
 
 	for _, v := range s.DriverAgents {
 		feature := Feature{
@@ -453,13 +469,18 @@ func SendDriverTaskEnvGeoJSON(s *Simulation) {
 		Data:          geojson,
 	}
 
-	e, err := json.Marshal(sendformat)
+	e, err := ffjson.Marshal(sendformat)
 	if err != nil {
 		fmt.Println(err)
 	}
+
 	s.Send <- string(e)
+	elapsed := time.Since(start)
+	log.Printf("Sending drivers' geojson %s", elapsed)
+
 }
 
+// for charts
 func SendDriverStats(s *Simulation) {
 	count := 0
 	count2 := 0

@@ -1,10 +1,13 @@
 package dispatchsim
 
 import (
+	"encoding/csv"
 	"encoding/json"
 	"fmt"
 	"log"
 	"math"
+	"os"
+	"strconv"
 	"sync"
 	"time"
 
@@ -12,27 +15,31 @@ import (
 )
 
 type Simulation struct {
-	isRunning            bool
-	Environments         map[int]*Environment
-	DriverAgents         map[int]*DriverAgent
-	DriverAgentMutex     sync.RWMutex
-	OM                   *OrderManager
-	RN                   *RoadNetwork
-	MasterSpeed          time.Duration
-	Recieve              chan string // recieve from websocket
-	Send                 chan string // send to websocket
-	OrderQueue           chan Order
-	UpdateMap            bool          // settings
-	UpdateMapSpeed       time.Duration // settings
-	DispatcherSpeed      time.Duration
-	UpdateStatsSpeed     time.Duration
-	TickerTime           time.Duration
-	Ticker               <-chan time.Time
-	SimulationTime       time.Time
-	TaskParameters       TaskParametersFormat
-	DispatcherParameters DispatcherParametersFormat
-	StartDrivers         chan interface{}
-	StartDispatchers     chan interface{}
+	isRunning             bool
+	Environments          map[int]*Environment
+	DriverAgents          map[int]*DriverAgent
+	DriverAgentMutex      sync.RWMutex
+	OM                    *OrderManager
+	RN                    *RoadNetwork
+	MasterSpeed           time.Duration
+	Recieve               chan string // recieve from websocket
+	Send                  chan string // send to websocket
+	OrderQueue            chan Order
+	UpdateMap             bool          // settings
+	UpdateMapSpeed        time.Duration // settings
+	DispatcherSpeed       time.Duration
+	UpdateStatsSpeed      time.Duration
+	TickerTime            time.Duration
+	Ticker                <-chan time.Time
+	SimulationTime        time.Time
+	TaskParameters        TaskParametersFormat
+	DispatcherParameters  DispatcherParametersFormat
+	VirusParameters       VirusParameters
+	StartDrivers          chan interface{} // start
+	StartDispatchers      chan interface{} // start
+	Stop                  chan interface{} // stop the simuation
+	StatsVirus            []StatsVirusFormat
+	CaptureSimulationTime time.Time
 }
 
 func SetupSimulation() Simulation {
@@ -50,29 +57,43 @@ func SetupSimulation() Simulation {
 		SimilarReputation: 0.5,
 	}
 
+	defaultVirusParams := VirusParameters{
+		InitialInfectedDriversPercentage: 10,
+		InfectedTaskPercentage:           10,
+		EvolveProbability:                []float64{0.5, 1},
+		SpreadProbability:                []float64{4, 9, 13},
+		DriverMask:                       10,
+		PassengerMask:                    10,
+		MaskEffectiveness:                95,
+	}
+
 	tickerTime := time.Duration(100) // make it adjustable
 
 	return Simulation{
-		isRunning:            false,
-		Environments:         make(map[int]*Environment),
-		DriverAgents:         make(map[int]*DriverAgent),
-		DriverAgentMutex:     sync.RWMutex{},
-		RN:                   SetupRoadNetwork2(),
-		MasterSpeed:          50,
-		Recieve:              make(chan string, 10000),
-		Send:                 make(chan string, 10000),
-		OrderQueue:           make(chan Order, 1000),
-		UpdateMap:            true, // set true to update mapbox
-		UpdateMapSpeed:       1000, // update speed to mapbox
-		DispatcherSpeed:      5000,
-		UpdateStatsSpeed:     1000,
-		TickerTime:           tickerTime,
-		Ticker:               time.Tick(tickerTime * time.Millisecond),         // TODO: Make adjustable - 20 millisecond -> increase by 1 min
-		SimulationTime:       time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local), // TODO: Make adjustable
-		TaskParameters:       defaultTaskParameters,
-		DispatcherParameters: defaultDispatcherParameters,
-		StartDrivers:         make(chan interface{}),
-		StartDispatchers:     make(chan interface{}),
+		isRunning:             false,
+		Environments:          make(map[int]*Environment),
+		DriverAgents:          make(map[int]*DriverAgent),
+		DriverAgentMutex:      sync.RWMutex{},
+		RN:                    SetupRoadNetwork2(),
+		MasterSpeed:           50,
+		Recieve:               make(chan string, 10000),
+		Send:                  make(chan string, 10000),
+		OrderQueue:            make(chan Order, 1000),
+		UpdateMap:             true, // set true to update mapbox
+		UpdateMapSpeed:        200,  // update speed to mapbox
+		DispatcherSpeed:       5000,
+		UpdateStatsSpeed:      1000,
+		TickerTime:            tickerTime,
+		Ticker:                time.Tick(tickerTime * time.Millisecond),         // TODO: Make adjustable - 20 millisecond -> increase by 1 min
+		SimulationTime:        time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local), // TODO: Make adjustable
+		TaskParameters:        defaultTaskParameters,
+		DispatcherParameters:  defaultDispatcherParameters,
+		VirusParameters:       defaultVirusParams,
+		StartDrivers:          make(chan interface{}),
+		StartDispatchers:      make(chan interface{}),
+		Stop:                  make(chan interface{}),
+		StatsVirus:            make([]StatsVirusFormat, 0),
+		CaptureSimulationTime: time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local),
 	}
 }
 
@@ -81,7 +102,8 @@ func (s *Simulation) Run() {
 	var noOfDrivers = 0
 	var startingDriverCount = 1 // starting id of driver
 
-	var k = false
+	var start = false
+	var startOrderRetriever = false
 
 	go s.SendMapData()
 	go s.SendStats()
@@ -106,51 +128,66 @@ func (s *Simulation) Run() {
 					}
 					s.TaskParameters = sf.TaskParameters
 					s.DispatcherParameters = sf.DispatcherParameters
+					s.VirusParameters = sf.VirusParameters
+					fmt.Printf("%v\n", sf.VirusParameters)
 					s.SendMessageToClient("Parameters applied")
 				}
 
 				fmt.Printf("[Simulator]Parameters applied\n")
 			case 1: // generate environment
 				fmt.Printf("[Simulator]Generate Environment %d \n", environmentId)
+
 				inputNoOfDrivers := int(command.([]interface{})[1].(float64))
 				latLngs := command.([]interface{})[2].([]interface{})
 
 				noOfDrivers = noOfDrivers + inputNoOfDrivers
 				env := SetupEnvironment(s, environmentId, inputNoOfDrivers, false, false, ConvertToArrayLatLng(latLngs))
 				s.Environments[environmentId] = &env
-				CreateMultipleDrivers(startingDriverCount, inputNoOfDrivers, &env, s)
+				CreateMultipleVirusDrivers(startingDriverCount, inputNoOfDrivers, &env, s)
 				go env.Run()                                                 // run environment
 				startingDriverCount = startingDriverCount + inputNoOfDrivers // update driver id count
 				environmentId++
+				s.SendMessageToClient("Generating " + strconv.Itoa(inputNoOfDrivers) + " drivers")
 				SendEnvGeoJSON(s) // send polygon to client // TODO: settle this case in client
 			case 2: // drivers
 			case 3: // order distributor
 				commandTypeLevelTwo := command.([]interface{})[1].(float64)
 				switch commandTypeLevelTwo {
 				case 0:
-					if len(s.Environments) > 0 && k == false {
-						k = true
+					if len(s.Environments) > 0 && start == false {
 						close(s.StartDrivers)     // start drivers
 						close(s.StartDispatchers) // start dispatcher
 						go s.StartTimer()
-						//go s.OM.runOrderDistributer()
+						start = true
+						s.SendMessageToClient("Simulation started")
 					} else {
-						s.Send <- "[Simulator]Cannot intailize order distributor"
+						if start == true {
+							//s.SendMessageToClient("Invalid command as simulation has started")
+							close(s.Stop)
+							s.isRunning = false
+						} else {
+							s.SendMessageToClient("Please create an environment with drivers")
+						}
+
 					}
 				case 1: // pickup lnglat and drop off lnglat in terms of waypoint
-					//fmt.Printf("accessing 3,1\n")
-					//sendCorrectedLocation(command, s)
+					if s.isRunning == false && start == true {
+						s.SendMessageToClient("Generating virus csv")
+						s.GenerateVirusCSV()
+					} else {
+						s.SendMessageToClient("Unable to generate virus csv. Simulation running")
+					}
 				case 2:
 					// initializing order retriever
-					om := SetupOrderRetrieve(s)
-					s.OM = &om
-					go om.runOrderRetrieve2()
-
+					if startOrderRetriever == false {
+						om := SetupOrderRetrieve(s)
+						s.OM = &om
+						go om.RunOrderRetriever()
+						s.SendMessageToClient("Retrieving orders")
+					}
 				}
 			}
-			//fmt.Println("[Simulation]Running")
 		}
-		//fmt.Println("[Simulation]Running2")
 	}
 	fmt.Println("[Simulation]Ended")
 }
@@ -160,14 +197,13 @@ func (s *Simulation) SendMapData() {
 	tick := time.Tick((s.UpdateMapSpeed) * time.Millisecond)
 	for {
 		select {
+		case <-s.Stop:
+			return
 		case <-tick:
-			//fmt.Printf("[Simulator]Sending map data\n")
 			if s.UpdateMap && s.isRunning { // send updates when there is Driver Agent available and environment placed
-				go SendDriversGeoJSON(s)
-				go SendTasksJSON(s)
+				SendVirusDriversGeoJSON(s)
+				SendVirusTasksJSON(s)
 			}
-			//default:
-
 		}
 	}
 }
@@ -177,12 +213,13 @@ func (s *Simulation) SendStats() {
 	tick := time.Tick((s.UpdateStatsSpeed) * time.Millisecond)
 	for {
 		select {
+		case <-s.Stop:
+			return
 		case <-tick:
 			if s.isRunning {
 				SendDriverStats(s)
-				SendTasksJSON(s)
+				SendEnvironmentStats(s)
 			}
-			//default:
 		}
 	}
 }
@@ -250,105 +287,7 @@ func (s *Simulation) GetMinMaxReputationFatigue() [2][2]float64 {
 	return [2][2]float64{{minReputation, maxReputation}, {minFatigue, maxFatigue}}
 }
 
-// // e.g 2,0,{environmentId},{DriverId}
-// // THIS METHOD IS UNUSED
-// func sendRandomPointDriver(command interface{}, s *Simulation, eId int, dId int) {
-// 	latLng := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-// 	s.Environments[eId].DriverAgents[dId].Recieve <- Message{CommandType: 2, CommandSecondType: 0, LatLng: latLng}
-// }
-
-// func sendIntializationDriver(command interface{}, s *Simulation, eId int, dId int) {
-// 	// fmt.Printf("%T %[1]v \n", command.([]interface{})[6].([]interface{}))
-// 	startLocation := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-// 	destLocation := ConvertToLatLng(command.([]interface{})[5].([]interface{}))
-// 	waypoints := ConvertToArrayLatLng(command.([]interface{})[6].([]interface{}))
-
-// 	message := Message{
-// 		CommandType:       2,
-// 		CommandSecondType: 1,
-// 		StartDestinationWaypoint: StartDestinationWaypoint{
-// 			StartLocation:       startLocation,
-// 			DestinationLocation: destLocation,
-// 			Waypoint:            waypoints,
-// 		},
-// 	}
-
-// 	s.DriverAgents[dId].Recieve <- message
-// }
-
-// func sendWaypointsDriver(command interface{}, s *Simulation, eId int, dId int) {
-
-// 	message := Message{
-// 		CommandType:       2,
-// 		CommandSecondType: 2,
-// 		Waypoint:          ConvertToArrayLatLng(command.([]interface{})[4].([]interface{})),
-// 	}
-
-// 	s.DriverAgents[dId].Recieve <- message
-// }
-
-// func sendGenerateResultDriver(command interface{}, s *Simulation, eId int, dId int) {
-// 	success := command.([]interface{})[4].(bool)
-// 	//fmt.Printf("%T %[1]v\n", success)
-// 	message := Message{
-// 		CommandType:       2,
-// 		CommandSecondType: 3,
-// 		Success:           success,
-// 	}
-
-// 	s.DriverAgents[dId].Recieve <- message
-// }
-
-// func sendMoveResultDriver(command interface{}, s *Simulation, eId int, dId int) {
-// 	location := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-// 	//fmt.Printf("%T %[1]v\n", success)
-// 	message := Message{
-// 		CommandType:       2,
-// 		CommandSecondType: 4,
-// 		LocationArrived:   location,
-// 		Success:           true, //TODO!!! remove this!
-// 	}
-
-// 	s.DriverAgents[dId].Recieve <- message
-// }
-
-// func sendRandomDestinationWaypoint(command interface{}, s *Simulation, eId int, dId int) {
-// 	// fmt.Printf("%T %[1]v \n", command.([]interface{})[6].([]interface{}))
-// 	startLocation := ConvertToLatLng(command.([]interface{})[4].([]interface{}))
-// 	destLocation := ConvertToLatLng(command.([]interface{})[5].([]interface{}))
-// 	waypoints := ConvertToArrayLatLng(command.([]interface{})[6].([]interface{}))
-
-// 	message := Message{
-// 		CommandType:       2,
-// 		CommandSecondType: 5,
-// 		StartDestinationWaypoint: StartDestinationWaypoint{
-// 			StartLocation:       startLocation,
-// 			DestinationLocation: destLocation,
-// 			Waypoint:            waypoints,
-// 		},
-// 	}
-
-// 	s.DriverAgents[dId].Recieve <- message
-// }
-
-// func sendCorrectedLocation(command interface{}, s *Simulation) {
-// 	pickupLocation := ConvertToLatLng(command.([]interface{})[2].([]interface{}))
-// 	dropoffLocation := ConvertToLatLng(command.([]interface{})[3].([]interface{}))
-// 	distance := command.([]interface{})[4].(float64)
-
-// 	r := RecieveFormat{
-// 		Command:       3,
-// 		CommandSecond: 1,
-// 		Data: CorrectedLocation{
-// 			StartCoordinate: pickupLocation,
-// 			EndCoordinate:   dropoffLocation,
-// 			Distance:        distance,
-// 		},
-// 	}
-
-// 	s.OM.Recieve <- r
-// }
-
+// unused
 func SendEnvGeoJSON(s *Simulation) {
 	geojson := &GeoJSONFormat{
 		Type:     "FeatureCollection",
@@ -382,6 +321,7 @@ func SendEnvGeoJSON(s *Simulation) {
 
 }
 
+/// unused
 func SendTasksJSON(s *Simulation) {
 	geojson := &GeoJSONFormat{
 		Type:     "FeatureCollection",
@@ -441,7 +381,7 @@ func SendDriversGeoJSON(s *Simulation) {
 		Features: make([]Feature, 0),
 	}
 
-	start := time.Now()
+	//start := time.Now()
 
 	for _, v := range s.DriverAgents {
 		feature := Feature{
@@ -475,12 +415,111 @@ func SendDriversGeoJSON(s *Simulation) {
 	}
 
 	s.Send <- string(e)
-	elapsed := time.Since(start)
-	log.Printf("Sending drivers' geojson %s", elapsed)
+	//elapsed := time.Since(start)
+	//log.Printf("Sending drivers' geojson %s", elapsed)
 
 }
 
-// for charts
+func SendVirusTasksJSON(s *Simulation) {
+	geojson := &GeoJSONFormat{
+		Type:     "FeatureCollection",
+		Features: make([]Feature, 0),
+	}
+
+	for _, v := range s.Environments {
+		//fmt.Printf("TasksToDrivers %v\n", v.TasksToDrivers)
+		//fmt.Printf("DriversToTasks %v\n", v.DriversToTasks)
+		v.TaskMutex.Lock()
+		for _, v2 := range v.Tasks {
+			if (v2.WaitEnd == time.Time{} && v2.Valid == true && v2.Appear == true) {
+				feature := Feature{
+					Type: "Feature",
+					Geometry: Geometry{
+						Type:        "Point",
+						Coordinates: latlngToArrayFloat(v2.PickUpLocation),
+					},
+					Properties: Properties{
+						Information: TaskVirusFormat{
+							Id:            v2.Id,
+							Type:          "Task",
+							Virus:         v2.Virus,
+							StartPosition: latlngToArrayFloat(v2.PickUpLocation),
+							EndPosition:   latlngToArrayFloat(v2.DropOffLocation),
+							Value:         v2.FinalValue,
+							Distance:      v2.Distance,
+						},
+					},
+				}
+				geojson.Features = append(geojson.Features, feature)
+			}
+		}
+		v.TaskMutex.Unlock()
+	}
+
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 3,
+		Data:          geojson,
+	}
+
+	e, err := ffjson.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	s.Send <- string(e)
+
+}
+
+func SendVirusDriversGeoJSON(s *Simulation) {
+	geojson := &GeoJSONFormat{
+		Type:     "FeatureCollection",
+		Features: make([]Feature, 0),
+	}
+
+	//start := time.Now()
+
+	s.DriverAgentMutex.Lock()
+	for _, v := range s.DriverAgents {
+		feature := Feature{
+			Type: "Feature",
+			Geometry: Geometry{
+				Type:        "Point",
+				Coordinates: latlngToArrayFloat(v.CurrentLocation),
+			},
+			Properties: Properties{
+				Information: DriverVirusFormat{
+					Id:          v.Id,
+					Type:        "Driver",
+					Virus:       v.Virus,
+					Status:      v.Status,
+					CurrentTask: v.CurrentTask.Id,
+				},
+			},
+		}
+		geojson.Features = append(geojson.Features, feature)
+	}
+	s.DriverAgentMutex.Unlock()
+
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 1,
+		Data:          geojson,
+	}
+
+	e, err := ffjson.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	s.Send <- string(e)
+	//elapsed := time.Since(start)
+	//log.Printf("Sending drivers' geojson %s", elapsed)
+
+}
+
+// For charts (4,5)
+// roam,pick,travelling, and regrets of drivers
 func SendDriverStats(s *Simulation) {
 	count := 0
 	count2 := 0
@@ -488,6 +527,17 @@ func SendDriverStats(s *Simulation) {
 	simTime := s.SimulationTime.Format("3:4:5PM")
 	driversRegret := make([]DriverRegretFormat, 0)
 
+	first := false
+	var minEarning float64 = 0
+	var totalEarning float64 = 0
+	var maxEarning float64 = 0
+	validDrivers := 0
+
+	firstwithTasks := false
+	var minCurrentEarning float64 = 0
+	var totalCurrentEarning float64 = 0
+	var maxCurrentEarning float64 = 0
+	validCurrentDrivers := 0
 	for _, v := range s.DriverAgents {
 		if v.Status == Roaming || v.Status == Allocating || v.Status == Matching {
 			count++
@@ -499,6 +549,48 @@ func SendDriverStats(s *Simulation) {
 			count3++
 		}
 
+		// min, average, max
+		if v.Valid {
+			validDrivers++
+
+			// Min, average, max of total earnings from valid drivers
+			if !first {
+				minEarning = v.TotalEarnings
+				maxEarning = v.TotalEarnings
+				//fmt.Printf("[SendData]%v %v\n", minEarning, maxEarning)
+				first = true
+			}
+
+			if v.TotalEarnings < minEarning {
+				minEarning = v.TotalEarnings
+			}
+
+			if v.TotalEarnings > maxEarning {
+				maxEarning = v.TotalEarnings
+			}
+
+			totalEarning += v.TotalEarnings
+
+			// Min, average, max of valid drivers who have a tasks on hand
+			if v.CurrentTask.Id != "null" && !firstwithTasks {
+				minCurrentEarning = v.CurrentTask.FinalValue
+				maxCurrentEarning = v.CurrentTask.FinalValue
+				firstwithTasks = true
+			}
+
+			if v.CurrentTask.Id != "null" {
+				if v.CurrentTask.FinalValue < minCurrentEarning {
+					minCurrentEarning = v.CurrentTask.FinalValue
+				}
+				if v.CurrentTask.FinalValue > maxCurrentEarning {
+					fmt.Printf("[SendData] New Max - Task %v\n", v.CurrentTask.Id)
+					maxCurrentEarning = v.CurrentTask.FinalValue
+				}
+				totalCurrentEarning += v.CurrentTask.FinalValue
+				validCurrentDrivers++
+			}
+		}
+
 		drf := &DriverRegretFormat{
 			EnvironmentId: v.E.Id,
 			DriverId:      v.Id,
@@ -508,17 +600,42 @@ func SendDriverStats(s *Simulation) {
 		driversRegret = append(driversRegret, *drf)
 	}
 
-	statsInfo := &StatsFormat{
+	var averageTotalCurrentEarning float64 = 0
+	if totalCurrentEarning == 0 {
+		maxCurrentEarning = 0
+		averageTotalCurrentEarning = 0
+		minCurrentEarning = 0
+	} else {
+		averageTotalCurrentEarning = totalCurrentEarning / float64(validCurrentDrivers)
+	}
+
+	//fmt.Printf("[SendData]Updated %v %v\n", minEarning, maxEarning)
+
+	statsInfo := &StatsDriverStatusFormat{
 		Time:              simTime,
 		RoamingDrivers:    count,
 		FetchingDrivers:   count2,
 		TravellingDrivers: count3,
 	}
 
+	sef := &StatsEarningFormat{
+		Time:    simTime,
+		Max:     maxEarning,
+		Average: totalEarning / float64(validDrivers),
+		Min:     minEarning,
+	}
+
+	scef := &StatsCurrentEarningFormat{
+		Time:    simTime,
+		Max:     maxCurrentEarning,
+		Average: averageTotalCurrentEarning,
+		Min:     minCurrentEarning,
+	}
+
 	// 1,3
 	sendformat := &SendFormat{
 		Command:       1,
-		CommandSecond: 3,
+		CommandSecond: 4,
 		Data:          statsInfo,
 	}
 
@@ -536,7 +653,7 @@ func SendDriverStats(s *Simulation) {
 	// 1,4
 	sendformat2 := &SendFormat{
 		Command:       1,
-		CommandSecond: 4,
+		CommandSecond: 5,
 		Data:          regretStatsInfo,
 	}
 
@@ -546,6 +663,63 @@ func SendDriverStats(s *Simulation) {
 	}
 	s.Send <- string(f) // send StatsRegretFormat
 
+	sendformat3 := &SendFormat{
+		Command:       1,
+		CommandSecond: 7,
+		Data:          sef,
+	}
+
+	g, err := json.Marshal(sendformat3)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s.Send <- string(g) // send StatsEarningFormat
+
+	sendformat4 := &SendFormat{
+		Command:       1,
+		CommandSecond: 8,
+		Data:          scef,
+	}
+
+	h, err := json.Marshal(sendformat4)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s.Send <- string(h) // send StatsEarningFormat
+
+}
+
+func SendEnvironmentStats(s *Simulation) {
+	simTime := s.SimulationTime.Format("3:4:5PM")
+	tasksToDrivers := 0
+	driversToTasks := 0
+	for _, e := range s.Environments {
+		tasksToDrivers = tasksToDrivers + e.TasksToDrivers
+		driversToTasks = driversToTasks + e.DriversToTasks
+	}
+
+	svf := &StatsVirusFormat{
+		Time:           simTime,
+		TasksToDrivers: tasksToDrivers,
+		DriversToTasks: driversToTasks,
+	}
+
+	if s.CaptureSimulationTime.Hour() != s.SimulationTime.Hour() || s.CaptureSimulationTime.Minute() != s.SimulationTime.Minute() {
+		s.StatsVirus = append(s.StatsVirus, *svf)
+		s.CaptureSimulationTime = s.SimulationTime
+	}
+
+	sendformat := &SendFormat{
+		Command:       1,
+		CommandSecond: 6,
+		Data:          svf,
+	}
+
+	f, err := json.Marshal(sendformat)
+	if err != nil {
+		fmt.Println(err)
+	}
+	s.Send <- string(f) // send StatsRegretFormat
 }
 
 func (s *Simulation) SendMessageToClient(message string) {
@@ -569,4 +743,36 @@ func (s *Simulation) StartTimer() {
 		s.SimulationTime = s.SimulationTime.Add(5000 * time.Millisecond) // add half a second
 		//fmt.Printf("[Time by StartTimer]%v\n", s.SimulationTime)
 	}
+}
+
+func (s *Simulation) GenerateVirusCSV() {
+	result := fmt.Sprintf("./src/github.com/harrizontal/dispatchserver/assets/virus/virus_data_%v_%v_%v_%v_%v.csv",
+		s.VirusParameters.InitialInfectedDriversPercentage,
+		s.VirusParameters.InfectedTaskPercentage,
+		s.VirusParameters.DriverMask,
+		s.VirusParameters.PassengerMask,
+		s.VirusParameters.MaskEffectiveness)
+
+	csvFile, err := os.Create(result)
+
+	if err != nil {
+		log.Fatalf("failed creating file: %s", err)
+	}
+
+	csvwriter := csv.NewWriter(csvFile)
+	count := 0
+	for _, row := range s.StatsVirus {
+		data := []string{strconv.Itoa(count),
+			row.Time,
+			strconv.Itoa(row.DriversToTasks),
+			strconv.Itoa(row.TasksToDrivers)}
+
+		csvwriter.Write(data)
+		count++
+	}
+
+	csvwriter.Flush()
+	csvFile.Close()
+
+	s.SendMessageToClient("Virus data generated")
 }

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"os"
 	"strconv"
 	"time"
@@ -44,7 +45,7 @@ func SetupOrderRetrieve(s *Simulation) OrderManager {
 	}
 }
 
-func (om *OrderManager) runOrderRetrieve2() {
+func (om *OrderManager) RunOrderRetriever() {
 	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/new_orders_first_1000.csv")
 	if err != nil {
 		log.Fatal(err)
@@ -86,22 +87,21 @@ func (om *OrderManager) runOrderRetrieve2() {
 	om.UpdatedOrders = orders
 	fot := ConvertUnixToTimeStamp(om.UpdatedOrders[0].RideStartTime)
 	lot := ConvertUnixToTimeStamp(om.UpdatedOrders[len(om.UpdatedOrders)-1].RideStartTime)
-	om.S.SimulationTime = time.Date(fot.Year(), fot.Month(), fot.Day(), fot.Hour(), fot.Minute(), fot.Second(), 0, time.Local)
-	om.S.SimulationTime = om.S.SimulationTime.Add(-1 * time.Minute) // minutes 3 minutes
+	var newTime time.Time = time.Date(fot.Year(), fot.Month(), fot.Day(), fot.Hour(), fot.Minute(), fot.Second(), 0, time.Local)
+	newTime = newTime.Add(-1 * time.Minute)
+	om.S.SimulationTime = newTime
+	om.S.CaptureSimulationTime = newTime
 
 	om.S.SendMessageToClient(strconv.Itoa(len(om.UpdatedOrders)) + " Orders loaded")
 	fmt.Printf("[OrderRetriever]Done \n")
 	fmt.Printf("[OrderRetriever]First order will be at %v\n", fot)
 	fmt.Printf("[OrderRetriever]Last order will be at %v\n", lot)
-	//go om.runOrderDistributer()
-	go om.RunOrderDistributor()
+	go om.RunOrderDistributorVirus()
 }
 
 // combine sendOrderToEnvironments with runOrderDistributer
 func (om *OrderManager) RunOrderDistributor() {
 	fmt.Printf("[OrderDistributor]Distributing orders to environment...\n")
-
-	//fmt.Printf("[OrderDistributor]Time:%v %v\n", om.S.SimulationTime, om.IsDistributing)
 
 	for _, o := range om.UpdatedOrders {
 	K:
@@ -122,64 +122,60 @@ func (om *OrderManager) RunOrderDistributor() {
 	fmt.Printf("[OrderDistributor]Finish distributing orders to environment...\n")
 }
 
-func (om *OrderManager) runOrderDistributer() {
-	fmt.Printf("[OrderDistributor]Start Order Distributer\n")
-	for range om.S.Ticker {
-		//fmt.Printf("[OrderDistributor]Time:%v %v\n", om.S.SimulationTime, om.IsDistributing)
-		om.S.SendMessageToClient(strconv.Itoa(len(om.UpdatedOrders)) + " Orders left in simulation")
-		currentTime := om.S.SimulationTime
-		if len(om.UpdatedOrders) > 0 {
-			//fmt.Printf("[OrderDistributor]No of orders left in the timeline:%v\n", len(om.UpdatedOrders))
-			sameOrderCount := 0
-		F:
-			for _, v := range om.UpdatedOrders {
-				orderTime := ConvertUnixToTimeStamp(v.RideStartTime) // we use RideStartTime as the start of order
-				if (currentTime.Hour() == orderTime.Hour()) && (currentTime.Minute() == orderTime.Minute()) {
-					om.IsDistributing = true
-					fmt.Printf("[OrderDistributor]Order %v sent to environment at time %v\n", v.Id, orderTime)
-					om.sendOrderToEnvironment(v)
-					sameOrderCount++
-				} else {
+// virus
+func (om *OrderManager) RunOrderDistributorVirus() {
+	fmt.Printf("[OrderDistributor]Distributing orders to environment...\n")
 
-					break F
+	infectedTasks := math.Round(float64(om.S.VirusParameters.InfectedTaskPercentage / 10))
+	infectedTasksWithMasks := math.Round(float64(float64(om.S.VirusParameters.PassengerMask)/100.00) * infectedTasks)
+	tasksWithMasks := math.Round(float64(float64(om.S.VirusParameters.PassengerMask)/100.00) * float64(10-int(infectedTasks)))
+	fmt.Printf("[OrderDistributor]Every 10, there is %v infected tasks\n", infectedTasks)
+	fmt.Printf("[OrderDistributor]Every %v of infected tasks, there is %v tasks wearing mask %v\n", infectedTasks, infectedTasksWithMasks, float64(float64(om.S.VirusParameters.PassengerMask)/100))
+	fmt.Printf("[OrderDistributor]Every %v healthy tasks, there is %v tasks wearing masks\n", float64(10-int(infectedTasks)), tasksWithMasks)
+	i := 0
+	for _, o := range om.UpdatedOrders {
+	K:
+		for _, e := range om.S.Environments {
+			if isPointInside(e.Polygon, orb.Point{o.StartCoordinate.Lng, o.StartCoordinate.Lat}) {
+				if math.Mod(float64(i), 10) <= infectedTasks-1 { // task with virus
+					if math.Mod(float64(i), infectedTasks) <= float64(infectedTasksWithMasks-1) { // task with mask
+						task := CreateVirusTaskFromOrder(o, e, Mild, true)
+						fmt.Printf("%v Task - Virus %v, Mask %v\n", i, task.Virus, task.Mask)
+						e.TasksTimeline = append(e.TasksTimeline, task)
+						e.Tasks[task.Id] = &task
+					} else {
+						task := CreateVirusTaskFromOrder(o, e, Mild, false) // task w/o mask
+						fmt.Printf("%v Task - Virus %v, Mask %v\n", i, task.Virus, task.Mask)
+						e.TasksTimeline = append(e.TasksTimeline, task)
+						e.Tasks[task.Id] = &task
+					}
+				} else { // tasks with virus
+					if math.Mod(float64(i), 10) <= infectedTasks+tasksWithMasks-1 { // task with mask
+						task := CreateVirusTaskFromOrder(o, e, None, true)
+						fmt.Printf("%v Task - Virus %v, Mask %v\n", i, task.Virus, task.Mask)
+						e.TasksTimeline = append(e.TasksTimeline, task)
+						e.Tasks[task.Id] = &task
+					} else {
+						task := CreateVirusTaskFromOrder(o, e, None, false) // task w/o mask
+						fmt.Printf("%v Task - Virus %v, Mask %v\n", i, task.Virus, task.Mask)
+						e.TasksTimeline = append(e.TasksTimeline, task)
+						e.Tasks[task.Id] = &task
+					}
 				}
+				i++
+				break K
 			}
-
-			if sameOrderCount > 0 {
-				om.UpdatedOrders = om.UpdatedOrders[sameOrderCount:]
-			}
-
-			//fmt.Printf("[OrderDistributor] No of orders left in simulation: %v\n", len(om.UpdatedOrders))
-		} else {
-			fmt.Printf("[OrderDistributor] Finish job")
-			return
-		}
-		om.IsDistributing = false
-	}
-}
-
-//Order will get "lost" when there is no environment fit for the Order or no environment in the simulation at all
-func (om *OrderManager) sendOrderToEnvironment(o Order) {
-	tasksGiven := false
-K:
-	for _, v := range om.S.Environments {
-
-		if isPointInside(v.Polygon, orb.Point{o.StartCoordinate.Lng, o.StartCoordinate.Lat}) {
-			fmt.Printf("[SendOrderToEnv - OM]Allocating Task %v to Environment %d\n", o.Id, v.Id)
-			//v.TotalTasks = v.TotalTasks + 1 // increment totaltasks
-			//v.TaskMutex.Lock()
-			v.GiveTask(o)
-			//v.TaskMutex.Unlock()
-			tasksGiven = true
-			break K
 		}
 	}
-	// no environment is able to take in this order
-	if !tasksGiven {
-		// order will get lost.
-		fmt.Printf("[SendOrderToEnv]No available environment to take order %v\n", o.Id)
-		tasksGiven = false
+
+	for _, e := range om.S.Environments {
+		fmt.Printf("[OrderDistributor]Environment %v has %v\n", e.Id, len(e.TasksTimeline))
+		e.TotalTasksToBeCompleted = len(e.TasksTimeline)
+
 	}
+
+	fmt.Printf("[OrderDistributor]Finish distributing orders to environment...\n")
+	om.S.SendMessageToClient("Awaiting to Start")
 }
 
 func ParseFloatResult(f string) float64 {
@@ -193,6 +189,5 @@ func ConvertUnixToTimeStamp(x string) time.Time {
 		panic(err)
 	}
 	tm := time.Unix(i, 0)
-	//fmt.Println(tm)
 	return tm
 }

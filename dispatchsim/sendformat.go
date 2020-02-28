@@ -18,7 +18,7 @@ type OrderInfoFormat struct {
 	DropOffLocation []float64 `json:"drop_off_coordinates"` // lat lng
 }
 
-type StatsFormat struct {
+type StatsDriverStatusFormat struct {
 	Time              string `json:"time"`
 	RoamingDrivers    int    `json:"no_of_roaming_drivers"`
 	FetchingDrivers   int    `json:"no_of_picking_up_drivers"`
@@ -28,6 +28,26 @@ type StatsFormat struct {
 type StatsRegretFormat struct {
 	Time          string               `json:"time"`
 	DriversRegret []DriverRegretFormat `json:"drivers_regret"`
+}
+
+type StatsVirusFormat struct {
+	Time           string `json:"time"`
+	TasksToDrivers int    `json:"tasks_to_drivers"`
+	DriversToTasks int    `json:"drivers_to_tasks"`
+}
+
+type StatsEarningFormat struct {
+	Time    string  `json:"time"`
+	Max     float64 `json:"max_earning"`
+	Average float64 `json:"average_earning"`
+	Min     float64 `json:"min_earning"`
+}
+
+type StatsCurrentEarningFormat struct {
+	Time    string  `json:"time"`
+	Max     float64 `json:"current_max_earning"`
+	Average float64 `json:"current_average_earning"`
+	Min     float64 `json:"current_min_earning"`
 }
 
 type DriverRegretFormat struct {

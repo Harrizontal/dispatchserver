@@ -14,6 +14,7 @@ package dispatchsim
 type SettingsFormat struct {
 	TaskParameters       TaskParametersFormat       `json:"task_parameters"`
 	DispatcherParameters DispatcherParametersFormat `json:"dispatcher_parameters"`
+	VirusParameters      VirusParameters            `json:"virus_parameters"`
 }
 
 type TaskParametersFormat struct {

@@ -8,6 +8,7 @@ import (
 	"math"
 	"os"
 	"strconv"
+	"time"
 
 	"github.com/paulmach/orb"
 	"github.com/paulmach/orb/quadtree"
@@ -103,9 +104,25 @@ func SetupRoadNetwork2() *RoadNetwork {
 
 	// start, end, distance, waypoints := rn.G_GetWaypoint(s, s2)
 	// fmt.Printf("%v %v %v %v", start, end, distance, waypoints)
+
+	//rn.G_Test()
+
+	//fmt.Println(ConvertUnixToTimeStamp("1478070000"))
 	return rn
 }
 
+func (rn *RoadNetwork) G_Test() {
+
+	for i := 0; i < 1000; i++ {
+		start := rn.G_GetRandomLocation()
+		end := rn.G_GetRandomLocation()
+		startTime := time.Now()
+		_, _, _, waypoints := rn.G_GetWaypoint(start, end)
+		elapsed := time.Since(startTime)
+		fmt.Printf("No of waypoints: %v %s\n", len(waypoints), elapsed)
+	}
+
+}
 func (rn *RoadNetwork) G_ProcessJSONFile() {
 	path, err := os.Getwd()
 	if err != nil {

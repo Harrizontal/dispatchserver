@@ -20,7 +20,7 @@ func main() {
 }
 
 func runOrderRetrieve(rn *dispatchsim.RoadNetwork) []dispatchsim.Order {
-	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/didifull.csv")
+	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/didi2.csv")
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -74,7 +74,7 @@ func runOrderRetrieve(rn *dispatchsim.RoadNetwork) []dispatchsim.Order {
 }
 
 func writeOrdersToFile(o []dispatchsim.Order) {
-	csvFile, err := os.Create("./src/github.com/harrizontal/dispatchserver/assets/new_orders_full.csv")
+	csvFile, err := os.Create("./src/github.com/harrizontal/dispatchserver/assets/new_orders_first_1000.csv")
 
 	if err != nil {
 		log.Fatalf("failed creating file: %s", err)
@@ -85,7 +85,7 @@ func writeOrdersToFile(o []dispatchsim.Order) {
 	count := 1
 	total := len(o)
 	for _, orderRow := range o {
-		fmt.Printf("[Writing] %v/%v\n", count, total)
+		fmt.Printf("[Writing]%v/%v\n", count, total)
 		data := []string{orderRow.Id,
 			orderRow.RideStartTime,
 			orderRow.RideStopTime,

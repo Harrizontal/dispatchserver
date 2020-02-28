@@ -35,6 +35,7 @@ type DriverAgent struct {
 	PendingTask         Task // store task during matching
 	CurrentTask         Task // store task when fetching/travelling
 	Status              DriverStatus
+	TotalEarnings       float64
 	Request             chan Message
 	Recieve             chan Message // receive
 	Recieve2            chan int
@@ -51,6 +52,8 @@ type DriverAgent struct {
 	StartDriving        time.Time
 	EndDriving          time.Time
 	Valid               bool
+	Virus               Virus // virus
+	Mask                bool  // virus
 }
 
 func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulation) {
@@ -65,7 +68,85 @@ func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulatio
 }
 
 func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
+	return DriverAgent{
+		S:                 s,
+		E:                 e,
+		Id:                id,
+		Name:              "John",
+		Status:            Roaming,
+		TotalEarnings:     0,
+		Request:           make(chan Message),
+		Recieve:           make(chan Message),
+		Recieve2:          make(chan int),
+		RecieveNewRoute:   make(chan []LatLng),
+		RequestNewRoute:   false,
+		Send:              make(chan string),
+		TasksCompleted:    0,
+		TaskHistory:       make([]Task, 0),
+		Motivation:        100,
+		Reputation:        5,
+		Fatigue:           0,
+		Regret:            0,
+		ChangeDestination: make(chan string),
+		Valid:             true,
+	}
+}
 
+// virus
+func CreateMultipleVirusDrivers(startingDriverId, n int, e *Environment, s *Simulation) {
+
+	fmt.Printf("[Environment %d]Creating a total of %v drivers\n", e.Id, n)
+	infected := int(math.Round(float64(s.VirusParameters.InitialInfectedDriversPercentage) / 100.00 * float64(n)))
+	fmt.Printf("[Environment %d]Expected to create a total of %v infected drivers out of %v drivers\n", e.Id, infected, n)
+
+	infectedDriversWithMask := int(math.Round(float64(s.VirusParameters.DriverMask) / 100.00 * float64(infected)))
+	fmt.Printf("[Environment %d]Expected to create %v infected drivers with Mask %v\n", e.Id, infectedDriversWithMask, float64(s.VirusParameters.DriverMask))
+	// spawn mild drivers w/ mask
+	for i := 0; i < infectedDriversWithMask; i++ {
+		driver := CreateVirusDriver(startingDriverId, e, s, Mild, true)
+		e.DriverAgents[startingDriverId] = &driver
+		s.DriverAgents[startingDriverId] = &driver
+		fmt.Printf("1Spawning Driver %d, Virus: %v, Mask: %v\n", driver.Id, driver.Virus, driver.Mask)
+		go e.DriverAgents[startingDriverId].ProcessTask3()
+		startingDriverId++
+	}
+
+	// spawn mild drivers w/o mask
+	for i := 0; i < (infected - infectedDriversWithMask); i++ {
+		driver := CreateVirusDriver(startingDriverId, e, s, Mild, false)
+		e.DriverAgents[startingDriverId] = &driver
+		s.DriverAgents[startingDriverId] = &driver
+		fmt.Printf("2Spawning Driver %d, Virus: %v, Mask: %v\n", driver.Id, driver.Virus, driver.Mask)
+		go e.DriverAgents[startingDriverId].ProcessTask3()
+		startingDriverId++
+	}
+
+	driversWithMask := int(math.Round(float64(s.VirusParameters.DriverMask) / 100.00 * float64(n-infected)))
+	fmt.Printf("[Environment %d]Expected to create %v healthy drivers with Mask\n", e.Id, driversWithMask)
+	// spawn normal drivers with mask
+	for i := 0; i < driversWithMask; i++ {
+		driver := CreateVirusDriver(startingDriverId, e, s, None, true)
+		e.DriverAgents[startingDriverId] = &driver
+		s.DriverAgents[startingDriverId] = &driver
+		fmt.Printf("3Spawning Driver %d, Virus: %v, Mask: %v\n", driver.Id, driver.Virus, driver.Mask)
+		go e.DriverAgents[startingDriverId].ProcessTask3()
+		startingDriverId++
+	}
+
+	// spawn normal drivers w/o mask
+	for i := 0; i < (n - infected - driversWithMask); i++ {
+		driver := CreateVirusDriver(startingDriverId, e, s, None, false)
+		e.DriverAgents[startingDriverId] = &driver
+		s.DriverAgents[startingDriverId] = &driver
+		fmt.Printf("4Spawning Driver %d, Virus: %v, Mask: %v\n", driver.Id, driver.Virus, driver.Mask)
+		go e.DriverAgents[startingDriverId].ProcessTask3()
+		startingDriverId++
+	}
+	fmt.Printf("[Environment %d]%v drivers spawned\n", e.Id, n)
+}
+
+// virus
+func CreateVirusDriver(id int, e *Environment, s *Simulation, v Virus, mask bool) DriverAgent {
 	return DriverAgent{
 		S:                 s,
 		E:                 e,
@@ -86,6 +167,8 @@ func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
 		Regret:            0,
 		ChangeDestination: make(chan string),
 		Valid:             true,
+		Virus:             v,
+		Mask:              mask,
 	}
 }
 
@@ -118,12 +201,13 @@ func (d *DriverAgent) Migrate() bool {
 func (d *DriverAgent) ProcessTask3() {
 	<-d.S.StartDrivers // close(StartDrivers) to start this function
 	go d.Drive3()
-	//go d.RunComputeRegret()
-
+	go d.RunComputeRegret()
+	sdw := &StartDestinationWaypoint{}  // driver current position to task start
+	sdw2 := &StartDestinationWaypoint{} // task start to task end
 	tick := time.Tick(d.E.S.MasterSpeed * time.Millisecond)
 	for {
 		select {
-		case <-d.E.Quit:
+		case <-d.E.Stop:
 			//fmt.Println("Driver " + strconv.Itoa(d.Id) + " ended his day")
 			return
 		case <-tick:
@@ -140,6 +224,8 @@ func (d *DriverAgent) ProcessTask3() {
 						d.Status = Matching
 						d.PendingTask = t.Task
 						d.CurrentTask = t.Task
+						sdw = &t.StartDestinationWaypoint
+						sdw2 = &t.StartDestinationWaypoint2
 						//fmt.Printf("Driver %d got Task %v! \n", d.Id, t.Task.Id)
 					} else {
 						d.Status = Roaming
@@ -159,7 +245,8 @@ func (d *DriverAgent) ProcessTask3() {
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = d.E.S.SimulationTime
 					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 					d.DestinationLocation = d.CurrentTask.StartCoordinate
-					d.Recieve2 <- 2
+
+					d.Recieve <- Message{StartDestinationWaypoint: *sdw}
 				} else {
 					// send Tasks to TaskQueue
 					d.E.TaskQueue <- d.CurrentTask
@@ -168,7 +255,9 @@ func (d *DriverAgent) ProcessTask3() {
 				}
 				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
 			case Fetching:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
+
+				// virus
+
 				reached, ok := d.ReachTaskPosition()
 				if ok == true && reached == true {
 					// driver has arrived at task location
@@ -181,10 +270,12 @@ func (d *DriverAgent) ProcessTask3() {
 
 					d.Status = Travelling
 					d.DestinationLocation = d.CurrentTask.EndCoordinate
-					d.Recieve2 <- 2
+
+					d.Recieve <- Message{StartDestinationWaypoint: *sdw2}
 				}
 			case Travelling:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
+				// virus
+
 				reached, ok := d.ReachTaskDestination()
 				if ok == true && reached == true {
 					// driver has completed the task
@@ -194,7 +285,7 @@ func (d *DriverAgent) ProcessTask3() {
 					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].TaskEnded = x
 					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
-
+					d.E.TotalTaskCompleted++
 					d.E.FinishQueue <- d.CurrentTask // put into FinishQueue
 					d.CompleteTask()
 					d.ComputeFatigue()
@@ -204,7 +295,9 @@ func (d *DriverAgent) ProcessTask3() {
 				}
 			}
 			// migrate to another environment
+
 			d.Migrate()
+
 		}
 	}
 	// fmt.Printf("[Driver %d - Env %d]Driver agent function finished\n", d.Id, d.E.Id)
@@ -213,47 +306,66 @@ func (d *DriverAgent) ProcessTask3() {
 
 func (d *DriverAgent) Drive3() {
 
-	tick := time.Tick(20 * time.Millisecond)
+	tick := time.Tick(50 * time.Millisecond)
 	//fmt.Printf("[Driver %v]Intializing driver with random location\n", d.Id)
 	start := d.S.RN.G_GetRandomLocation()
 	d.CurrentLocation = start
 	//fmt.Printf("[Driver %v]Done\n", d.Id)
 
 	for {
+		//K:
 	K:
 		select {
+		case <-d.E.S.Stop:
+			return
 		case <-tick:
 			select {
-			case x := <-d.Recieve2:
-				switch x {
-				case 2:
-					//fmt.Printf("[Driver %d]Going appointed destination!\n", d.Id)
-					start, end, distance, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
-					d.CurrentLocation = start   // no need this
-					d.DestinationLocation = end // no need this
-					switch x := len(waypoints); {
-					case x > 1:
-						d.Waypoint = waypoints[1:]
-					case x == 1:
-						d.Waypoint = waypoints
-					case x == 0:
-						if distance == math.Inf(1) {
-							fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
-							panic("waypoint is 0")
-						}
-						fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
-						panic("waypoint is 0")
-					}
-					//fmt.Printf("[Driver %d]Updated current and destination location, and waypoints\n", d.Id)
-					break K
-				}
+			case m := <-d.Recieve:
+				d.CurrentLocation = m.StartDestinationWaypoint.StartLocation
+				d.DestinationLocation = m.StartDestinationWaypoint.DestinationLocation
+				d.Waypoint = m.StartDestinationWaypoint.Waypoint
+				break K
 			default:
 				d.DriveToNextPoint4()
+				// virus function
+				d.InteractVirus(&d.CurrentTask)
 			}
 
 		}
 	}
 	panic("[Driver]unreachable\n")
+}
+
+func (d *DriverAgent) GetWayPoint() {
+	fmt.Printf("[Driver %d - %v]Getting waypoint\n", d.Id, d.Status)
+	startTime := time.Now()
+	start, end, distance, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
+	if distance == math.Inf(1) {
+		fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
+		panic("waypoint is 0")
+	}
+
+	switch x := len(waypoints); {
+	case x > 1:
+		waypoints = waypoints[1:]
+	case x == 1:
+		waypoints = waypoints
+	case x == 0:
+		//fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
+		panic("waypoint is 0")
+	}
+
+	m := &Message{
+		StartDestinationWaypoint: StartDestinationWaypoint{
+			StartLocation:       start,
+			DestinationLocation: end,
+			Waypoint:            waypoints,
+		},
+	}
+
+	elapsed := time.Since(startTime)
+	d.Recieve <- *m
+	fmt.Printf("[Driver %d - %v]Get waypoint: %s \n", d.Id, d.Status, elapsed)
 }
 
 func (d *DriverAgent) DriveToNextPoint4() {
@@ -269,8 +381,11 @@ func (d *DriverAgent) DriveToNextPoint4() {
 		// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
 		if d.Status == Roaming || d.Status == Matching || d.Status == Allocating {
 			//fmt.Printf("[Driver %d] Go random location\n", d.Id)
+			//startTime := time.Now()
 			nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
 			d.CurrentLocation = nextLocation
+			//end := time.Since(startTime)
+			//fmt.Printf("[Driver %d - %v]Random %s\n", d.Id, d.Status, end)
 
 			// start, end, waypoints := d.S.RN.G_GetEndWaypoint(d.CurrentLocation)
 			// fmt.Printf("[Driver %v]Sending Random Waypoints: %v\n", d.Id, len(waypoints))
@@ -279,6 +394,10 @@ func (d *DriverAgent) DriveToNextPoint4() {
 			// if len(waypoints) > 1 {
 			// 	d.Waypoint = waypoints[1:]
 			// }
+		} else {
+			//nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
+			//d.CurrentLocation = nextLocation
+			//fmt.Printf("[Driver %d - %v]No road to go\n", d.Id, d.Status)
 		}
 	}
 }
@@ -328,6 +447,7 @@ func (d *DriverAgent) ReachTaskDestination() (bool, bool) {
 // After driver completed a task, update rating, taskscompleted, fatigue and motivation
 func (d *DriverAgent) CompleteTask() (bool, bool) {
 
+	d.TotalEarnings += d.CurrentTask.FinalValue
 	getRating := d.CurrentTask.ComputeRating(d.S)
 	//fmt.Printf("[CompleteTask]Task %v with value of %d gave Driver %d a rating of %f \n", d.CurrentTask.Id, d.CurrentTask.Value, d.Id, getRating)
 
@@ -356,15 +476,17 @@ func (d *DriverAgent) ComputeFatigue() {
 
 // use goroutines?
 func (d *DriverAgent) ComputeMotivation() {
-	d.Motivation = d.Motivation + 1
+	d.Motivation = d.Motivation
 }
 
 //
 
 func (d *DriverAgent) RunComputeRegret() {
-	x := time.Tick(2000 * time.Millisecond)
+	x := time.Tick(d.E.S.UpdateMapSpeed * time.Millisecond)
 	for {
 		select {
+		case <-d.E.S.Stop:
+			return
 		case <-x:
 			d.ComputeRegret()
 		}
@@ -375,7 +497,7 @@ func (d *DriverAgent) RunComputeRegret() {
 func (d *DriverAgent) ComputeRegret() {
 	//fmt.Printf("Computing Regret for Driver %d - Env %d\n", d.Id, d.E.Id)
 	averageValueOfOrders := d.S.ComputeAverageValue(d)
-	fmt.Printf("[Driver %d]Regret now: %f, Value of Order: %f, Average value of Orders: %f\n", d.Id, d.Regret, float64(d.CurrentTask.FinalValue), averageValueOfOrders)
+	//fmt.Printf("[Driver %d]Regret now: %f, Value of Order: %f, Average value of Orders: %f\n", d.Id, d.Regret, float64(d.CurrentTask.FinalValue), averageValueOfOrders)
 	// Driver's current regret - current task's value + average value of orders which other drivers take at the point of time (with similar reputation)
 	computedRegret := d.Regret - float64(d.CurrentTask.FinalValue) + averageValueOfOrders
 
@@ -418,4 +540,29 @@ func GetNormalizedValue(mm [2]float64, value float64) float64 {
 	}
 
 	return ((value - min) / (max - min))
+}
+
+func (d *DriverAgent) InteractVirus(t *Task) {
+	currentTask := d.CurrentTask
+	if currentTask.Id != "null" {
+		if d.Virus == None && t.Virus == None {
+			return
+		} else if d.Virus != None && d.Status == Travelling && t.Virus == None { // Driver spreading virus to passengers
+			if SpreadVirus(d.S.VirusParameters, d.Mask) && d.Virus.InAir(d.S.VirusParameters) && RecieveVirus(d.S.VirusParameters, t.Mask) {
+				d.E.S.Environments[currentTask.EnvironmentId].Tasks[currentTask.Id].Virus = Mild
+				t.Virus = Mild
+				d.E.DriversToTasks++
+			}
+		} else if d.Virus == None && d.Status == Travelling && t.Virus != None { // Task spreading virus to passengers
+			if SpreadVirus(d.S.VirusParameters, t.Mask) && t.Virus.InAir(d.S.VirusParameters) && RecieveVirus(d.S.VirusParameters, d.Mask) {
+				d.Virus = Mild
+				d.E.TasksToDrivers++
+			}
+		}
+	}
+
+	if d.Virus != None {
+		d.Virus = d.Virus.Evolve(d.S.VirusParameters)
+	}
+
 }

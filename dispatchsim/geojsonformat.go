@@ -46,3 +46,23 @@ type TaskFormat struct {
 	Value         float64   `json:"value"`
 	Distance      float64   `json:"distance"`
 }
+
+// Virus
+type DriverVirusFormat struct {
+	Id          int          `json:"id"`
+	Virus       Virus        `json:"virus"`
+	Status      DriverStatus `json:"status"`
+	CurrentTask string       `json:"current_task_id"`
+	Type        string       `json:"type"`
+}
+
+// Virus
+type TaskVirusFormat struct {
+	Id            string    `json:"id"`
+	Type          string    `json:"type"`
+	Virus         Virus     `json:"virus"`
+	StartPosition []float64 `json:"start_coordinates"`
+	EndPosition   []float64 `json:"end_coordinates"`
+	Value         float64   `json:"value"`
+	Distance      float64   `json:"distance"`
+}

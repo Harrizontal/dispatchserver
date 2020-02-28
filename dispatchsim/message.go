@@ -1,14 +1,15 @@
 package dispatchsim
 
 type Message struct {
-	CommandType              int
-	CommandSecondType        int
-	Task                     Task
-	LatLng                   LatLng                   // case 0
-	StartDestinationWaypoint StartDestinationWaypoint // case 1
-	Waypoint                 []LatLng                 // case:2
-	Success                  bool
-	LocationArrived          LatLng
+	CommandType               int
+	CommandSecondType         int
+	Task                      Task
+	LatLng                    LatLng                   // case 0
+	StartDestinationWaypoint  StartDestinationWaypoint // case 1
+	StartDestinationWaypoint2 StartDestinationWaypoint // for task - start to end
+	Waypoint                  []LatLng                 // case:2
+	Success                   bool
+	LocationArrived           LatLng
 }
 
 //1

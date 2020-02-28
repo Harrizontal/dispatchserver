@@ -37,6 +37,13 @@ func wsEndpoint(w http.ResponseWriter, r *http.Request) {
 
 	go reader(ws)
 	go writer(ws)
+
+	// not working...
+	sendMessage := "Client Connected"
+	if err := ws.WriteMessage(1, []byte(sendMessage)); err != nil {
+		log.Println(err)
+		return
+	}
 }
 
 func reader(conn *websocket.Conn) {

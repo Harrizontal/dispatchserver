@@ -123,6 +123,7 @@ func ConvertToArrayLatLng(in []interface{}) []LatLng {
 	return s
 }
 
+// Convert Array of LatLng to Polygon (orb.Ring)
 func ConvertLatLngArrayToPolygon(ll []LatLng) orb.Polygon {
 	poly := make(orb.Polygon, 0)
 	ls := make(orb.LineString, 0)

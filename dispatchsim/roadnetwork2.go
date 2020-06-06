@@ -201,22 +201,7 @@ func (rn *RoadNetwork) PopulateGraph() {
 	}
 	elapsed := time.Since(start)
 	fmt.Printf("[RoadNetwork - PopulateGraph]Graph populated - nodes:%v links:%v\n", len(rn.Nodes), len(rn.Links))
-	fmt.Printf("[RoadNetwork - PopulateGraph]Generating road network took %s\n", elapsed)
-	// start2 := time.Now()
-	// test graph
-	// for i := 0; i < 2000; i++ {
-	// 	var to int64 = rn.GetRandomNode().Id
-	// 	var from int64 = rn.GetRandomNode().Id
-	// 	_, e := path.AStar(simple.Node(to), simple.Node(from), rn.RoadGraphGonum, rn.returnR)
-	// 	//fmt.Println(a.To(from))
-	// 	fmt.Printf("%v, %v\n", i, e)
-	// }
-	// elapsed2 := time.Since(start2)
-	//log.Printf("Waypoint generation took %s", elapsed2)
-
-	// for i := 0; i < 2000; i++ {
-	// 	fmt.Println(rn.RoadGraphGonum.From(rn.GetRandomNode().Id))
-	// }
+	fmt.Printf("[RoadNetwork - PopulateGraph]Generating road network took %s\n. Road network generated.", elapsed)
 
 }
 
@@ -233,9 +218,6 @@ func (rn *RoadNetwork) GenerateQuadTree() {
 		//fmt.Println(point)
 		rn.QuadTree.Add(point)
 	}
-	// nearest := rn.QuadTree.Find(orb.Point{104.0554, 30.6522726})
-
-	// fmt.Printf("nearest: %+v\n", nearest)
 	fmt.Printf("[RoadNetwork - GenerateQuadTree]Quadtree generated\n")
 }
 

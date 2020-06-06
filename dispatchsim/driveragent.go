@@ -10,8 +10,16 @@ import (
 	"github.com/paulmach/orb"
 )
 
+// Sort of an "enum" for DriverStatus
 type DriverStatus int
 
+// There are 5 status for drivers
+// Roaming - Drivers roam around the map and waiting for tasks assigned by the dispatcher
+// Matching - Drivers is in the midst of accepting the tasks (currently - all driver will 100% accept the tasks)
+// Fetching (it is known as Picking up in the user interface) - Drivers is PICKING UP the passenger
+// Travelling (also known as Fetching in the user interface) - The passenger is with the driver now. Driver is fetching the passenger to the destination
+// Allocating - The driver is being accounted in the dispatcher algorithm. When the driver has a status of "Allocating", other dispatchers (there could be intercepting boundaries defined by the user) cannot take into the account of this driver
+// First 4 is visible in the visualization tool, but not Allocating as it is sort of a hidden status.
 const (
 	Roaming DriverStatus = iota
 	Matching
@@ -25,40 +33,41 @@ func (d DriverStatus) String() string {
 }
 
 type DriverAgent struct {
-	S                   *Simulation
-	E                   *Environment
-	Id                  int
-	Name                string
-	CurrentLocation     LatLng
-	Waypoint            []LatLng
-	NextLocation        LatLng
-	DestinationLocation LatLng
-	PendingTask         Task // store task during matching
-	CurrentTask         Task // store task when fetching/travelling
-	Status              DriverStatus
-	TotalEarnings       float64
-	Request             chan Message
-	Recieve             chan Message // receive
-	Recieve2            chan int
-	RecieveNewRoute     chan []LatLng
-	RequestNewRoute     bool
-	Send                chan string // send
-	TasksCompleted      int
-	TaskHistory         []Task
-	Motivation          float64
-	Reputation          float64
-	Fatigue             float64
-	Regret              float64
-	RankingIndex        float64
+	S                   *Simulation   // The driveragent belongs to the simulation
+	E                   *Environment  // The driveragent belongs to an environment (or boundary)
+	Id                  int           // Each driver holds a id
+	Name                string        // Just name of the driver.
+	CurrentLocation     LatLng        // Current location of the driver
+	Waypoint            []LatLng      // An array of Latlng for drivers to go to.
+	NextLocation        LatLng        // Next Latlng for driver to go
+	DestinationLocation LatLng        // Destination of the driver (typically is updated when the driver holds a task)
+	PendingTask         Task          // store task during matching
+	CurrentTask         Task          // store task when fetching/travelling
+	Status              DriverStatus  // Status of the driver
+	TotalEarnings       float64       // Total earnings of driver earned in the simulation
+	Request             chan Message  // Request
+	Recieve             chan Message  // Receive
+	Recieve2            chan int      // Recieve
+	RecieveNewRoute     chan []LatLng // Recieve a new array of LatLng
+	RequestNewRoute     bool          // Unused variable
+	Send                chan string   // Send
+	TasksCompleted      int           // Number of tasks completed for the driver
+	TaskHistory         []Task        // Track the history of tasks completed
+	Motivation          float64       // Motivation variable
+	Reputation          float64       // Reputation variable
+	Fatigue             float64       // Fatigue variable
+	Regret              float64       // Regret variable
+	RankingIndex        float64       // RankingIndex variable
 	ChangeDestination   chan string
-	StartDriving        time.Time
-	EndDriving          time.Time
-	Valid               bool
-	Virus               Virus // virus
-	Mask                bool  // virus
-	DriverMutex         sync.RWMutex
+	StartDriving        time.Time    // Time started for this driver
+	EndDriving          time.Time    // Time ended for this driver
+	Valid               bool         // Valid is important variable. If valid == true, the dispatcher can take into account of this driver while executing the dispatcher algorithm. If valid == false, the driver is deemed as an islander (stuck in an island)
+	Virus               Virus        // Virus has 3 levels.
+	Mask                bool         // If true, driver got wear mask. Else, driver doesnt wear mask
+	DriverMutex         sync.RWMutex // Mutex
 }
 
+// Function to create multiple drivers in the Simluation (random area)
 func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulation) {
 	for i := 0; i < n; i++ {
 		driver := CreateDriver(startingDriverId, e, s)
@@ -70,6 +79,7 @@ func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulatio
 	fmt.Printf("[Environment %d]%v drivers spawned\n", e.Id, n)
 }
 
+// Function to intitalize one driver agent
 func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
 	return DriverAgent{
 		S:                 s,
@@ -96,7 +106,8 @@ func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
 	}
 }
 
-// virus
+// Virus version
+// Function to create multiple drivers in the Simluation (random area)
 func CreateMultipleVirusDrivers(startingDriverId, n int, e *Environment, s *Simulation) {
 
 	fmt.Printf("[Environment %d]Creating a total of %v drivers\n", e.Id, n)
@@ -149,7 +160,8 @@ func CreateMultipleVirusDrivers(startingDriverId, n int, e *Environment, s *Simu
 	fmt.Printf("[Environment %d]%v drivers spawned\n", e.Id, n)
 }
 
-// virus
+// Virus version
+// Function to intitalize one driver agent
 func CreateVirusDriver(id int, e *Environment, s *Simulation, v Virus, mask bool) DriverAgent {
 	return DriverAgent{
 		S:                 s,
@@ -178,10 +190,13 @@ func CreateVirusDriver(id int, e *Environment, s *Simulation, v Virus, mask bool
 	}
 }
 
+// Migrating to another environment (or boundary)
+// E.g If driver is in environment 1, and a few seconds later, the driver is in envrionment 2.
+// Driver have to migrate to environment 2 for the dispatcher in environment 2 to assign tasks to driver
 func (d *DriverAgent) Migrate() bool {
 	// if the driver's location is in the not same
 	cl := d.CurrentLocation
-	point := orb.Point{cl.Lng, cl.Lat} //TODO pls fix the position of LatLng to LngLat
+	point := orb.Point{cl.Lng, cl.Lat}
 	inside := isPointInside(d.E.Polygon, point)
 	if !inside {
 		for _, v := range d.E.S.Environments {
@@ -195,7 +210,7 @@ func (d *DriverAgent) Migrate() bool {
 				v.DriverAgents[d.Id] = d
 				v.DriverAgentMutex.Unlock()
 				d.E = v
-				//fmt.Printf("[Driver %d]Migrating to %d\n", d.Id, v.Id)
+
 				return true
 			}
 		}
@@ -205,8 +220,11 @@ func (d *DriverAgent) Migrate() bool {
 
 func (d *DriverAgent) ProcessTask3() {
 	<-d.S.StartDrivers // close(StartDrivers) to start this function
+	// There are two travelling mode for the driver. Travel by node and travel by distance
+	// Select travel by distance for a more realistic approach for the simulation (could take longer for the simulation to complete)
+	// Select travel by node for a way to visualization how the virus spread or complete tasks
 	if d.E.S.DriverParameters.TravellingMode == "node" {
-		go d.Drive3()
+		go d.DriveNode()
 	} else {
 		go d.DriveDistance()
 	}
@@ -217,15 +235,13 @@ func (d *DriverAgent) ProcessTask3() {
 	for {
 		select {
 		case <-d.E.Stop:
-			//fmt.Println("Driver " + strconv.Itoa(d.Id) + " ended his day")
 			return
 		case <-tick:
-			//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
 			switch d.Status {
 			case Roaming:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
 			case Allocating:
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
+				// If the driver has a status of Allocating, the driver should be expecing a task
+				// If the driver is not expecting a task (recieves a null task), driver status will go back to Roaming
 				select {
 				case t := <-d.Request:
 					// fmt.Printf("Task address @ during matching: %p\n", &t)
@@ -235,56 +251,56 @@ func (d *DriverAgent) ProcessTask3() {
 						d.CurrentTask = t.Task
 						sdw = &t.StartDestinationWaypoint
 						sdw2 = &t.StartDestinationWaypoint2
-						//fmt.Printf("Driver %d got Task %v! \n", d.Id, t.Task.Id)
 					} else {
 						d.Status = Roaming
-						//fmt.Printf("Driver %d did not get any tasks \n", d.Id)
 					}
 				default:
 
 				}
 			case Matching:
+				// Driver accepts the tasks
 				if d.AcceptRide() == true {
 					d.CurrentTask = d.PendingTask
 					d.PendingTask = Task{Id: "null", FinalValue: 0.00} // bad way...
 					d.Status = Fetching
 
+					// Tell the dispatcher that the driver has accepted the task
+					// Obselete function
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Dispatcher.Response <- DriverMatchingResult{Accept: true, Id: d.Id}
-					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
+
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = d.E.S.SimulationTime
-					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
+
 					d.DestinationLocation = d.CurrentTask.StartCoordinate
 
 					d.Recieve <- Message{StartDestinationWaypoint: *sdw}
 				} else {
-					// send Tasks to TaskQueue
+
 					d.E.TaskQueue <- d.CurrentTask
 					d.PendingTask = Task{Id: "null", FinalValue: 0.00}
 					d.Status = Roaming
 				}
-				//fmt.Printf("[Driver %d - Env %d]%v \n", d.Id, d.E.Id, d.Status.String())
+
 			case Fetching:
+				// Note: Fetching is equalivant to picking up the passenger
 
-				// virus
-
+				// if the driver has reach the start location of the driver
 				reached, ok := d.ReachTaskPosition()
 				if ok == true && reached == true {
 					// driver has arrived at task location
 					x := d.E.S.SimulationTime
 					d.CurrentTask.WaitEnd = x
 
-					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitEnd = x
-					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Unlock()
 
-					d.Status = Travelling
-					d.DestinationLocation = d.CurrentTask.EndCoordinate
+					d.Status = Travelling                               // Set to Travelling
+					d.DestinationLocation = d.CurrentTask.EndCoordinate // Set end coordinate to driver
 
 					d.Recieve <- Message{StartDestinationWaypoint: *sdw2}
 				}
 			case Travelling:
-				// virus
+				// Note: Travelling is equalivant to fetching the passenger to the destination
 
+				// If the driver has reach the destination
 				reached, ok := d.ReachTaskDestination()
 				if ok == true && reached == true {
 					// driver has completed the task
@@ -300,20 +316,18 @@ func (d *DriverAgent) ProcessTask3() {
 					d.ComputeFatigue()
 					d.ComputeMotivation()
 					d.Status = Roaming
-					d.DriveToNextPoint4()
+					d.DriveToNextPoint()
 				}
 			}
-			// migrate to another environment
-
+			// migrate to another boundary (provided if the driver is in another boundary)
 			d.Migrate()
 
 		}
 	}
-	// fmt.Printf("[Driver %d - Env %d]Driver agent function finished\n", d.Id, d.E.Id)
 	log.Fatalf("[Driver %d]Process Ended\n", d.Id)
 }
 
-func (d *DriverAgent) Drive3() {
+func (d *DriverAgent) DriveNode() {
 	// 50 miliseconds
 	tick := time.Tick(time.Duration(d.E.S.DriverParameters.TravelInterval) * time.Millisecond)
 	start := d.S.RN.GetRandomLocation()
@@ -332,7 +346,7 @@ func (d *DriverAgent) Drive3() {
 				d.Waypoint = m.StartDestinationWaypoint.Waypoint
 				break K
 			default:
-				d.DriveToNextPoint4()
+				d.DriveToNextPoint()
 				d.InteractVirus(&d.CurrentTask) // virus function
 			}
 
@@ -397,7 +411,9 @@ func (d *DriverAgent) GetWayPoint() {
 	fmt.Printf("[Driver %d - %v]Get waypoint: %s \n", d.Id, d.Status, elapsed)
 }
 
-func (d *DriverAgent) DriveToNextPoint4() {
+// If there still Latlng in the waypoint, let the driver travel to the LatLng in the wapoint first.
+// If there is no more waypoint, driver can travel to a random node
+func (d *DriverAgent) DriveToNextPoint() {
 	switch noOfWaypoints := len(d.Waypoint); {
 	case noOfWaypoints >= 2:
 		d.CurrentLocation = d.Waypoint[0]
@@ -406,15 +422,16 @@ func (d *DriverAgent) DriveToNextPoint4() {
 		d.CurrentLocation = d.Waypoint[0]
 		d.Waypoint = d.Waypoint[:0]
 	case noOfWaypoints == 0:
-		// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
 		if d.Status == Roaming || d.Status == Matching || d.Status == Allocating {
-			//time.Sleep(20 * time.Millisecond)
+			// Go a random node (but next to it)
+			// TODO: Design a better random driving mechanism but I am limited to CPU usage
 			nextLocation := d.S.RN.GetNextPoint(d.CurrentLocation)
 			d.CurrentLocation = nextLocation
 		}
 	}
 }
 
+// Similar to DriveToNextPoint but accounting the distance.
 func (d *DriverAgent) DriveToNextPointDistance() {
 	switch noOfWaypoints := len(d.Waypoint); {
 	case noOfWaypoints >= 2:
@@ -433,7 +450,6 @@ func (d *DriverAgent) DriveToNextPointDistance() {
 		d.CurrentLocation = d.Waypoint[0]
 		d.Waypoint = d.Waypoint[:0]
 	case noOfWaypoints == 0:
-		// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
 		if d.Status == Roaming || d.Status == Matching || d.Status == Allocating {
 			nextLocation := d.S.RN.GetNextPoint(d.CurrentLocation)
 
@@ -447,6 +463,7 @@ func (d *DriverAgent) DriveToNextPointDistance() {
 	}
 }
 
+// Function for driver to driver randomly
 func (d *DriverAgent) DriveRandom() {
 	_, _, waypoints := d.S.RN.GetEndWaypoint(d.CurrentLocation)
 	// d.Waypoint = waypoints
@@ -455,12 +472,13 @@ func (d *DriverAgent) DriveRandom() {
 }
 
 // Accept rate
+// Currently is 100%
 func (d *DriverAgent) AcceptRide() bool {
 	return true
 }
 
+// Check if the driver has reach the start location of the Task
 func (d *DriverAgent) ReachTaskPosition() (bool, bool) {
-	//fmt.Printf("[Driver %d - Env %d]Checking whether reach passenger \n", d.Id, d.E.Id)
 	if d.CurrentLocation == d.CurrentTask.StartCoordinate {
 		return true, true
 	} else {
@@ -468,8 +486,8 @@ func (d *DriverAgent) ReachTaskPosition() (bool, bool) {
 	}
 }
 
+// Check if driver has reach the destination
 func (d *DriverAgent) ReachTaskDestination() (bool, bool) {
-	//fmt.Printf("[Driver %d - Env %d]Checking whether reach passenger's destination \n", d.Id, d.E.Id)
 	if d.CurrentLocation == d.CurrentTask.EndCoordinate {
 		return true, true
 	} else {
@@ -493,6 +511,8 @@ func (d *DriverAgent) CompleteTask() (bool, bool) {
 	return true, true
 }
 
+// Calculate the reputation of the driver once the task is completed
+// The task will give a rating to the driver (could be random or predefined from 0 to 5 - user can set at the visualization tool)
 func (d *DriverAgent) RecomputeReputation() {
 	rating := 0.00
 	for _, t := range d.TaskHistory {
@@ -501,16 +521,18 @@ func (d *DriverAgent) RecomputeReputation() {
 	d.Reputation = rating / float64(len(d.TaskHistory))
 }
 
+// For every successful tasks completed, fatigue increases
 func (d *DriverAgent) ComputeFatigue() {
 	d.Fatigue = d.Fatigue + 1
 }
 
+// Motivation stays the same for now
 func (d *DriverAgent) ComputeMotivation() {
 	d.Motivation = d.Motivation
 }
 
-//
-
+// Compute the regret of the driver
+// The computation of regret is a process
 func (d *DriverAgent) RunComputeRegret() {
 	// d.E.S.UpdateMapSpeed
 	x := time.Tick(d.E.S.RegretTickerTime * time.Millisecond)
@@ -536,6 +558,7 @@ func (d *DriverAgent) ComputeRegret() {
 
 }
 
+// Calculate the ranking index of the driver
 func (d *DriverAgent) GetRankingIndex(mmRepFat *[2][2]float64) float64 {
 	var rankingIndex float64 = 0
 
@@ -546,11 +569,13 @@ func (d *DriverAgent) GetRankingIndex(mmRepFat *[2][2]float64) float64 {
 	return rankingIndex
 }
 
+// Calculate the RAW ranking index (without normalization)
 func (d *DriverAgent) GetRawRankingIndex() float64 {
 	rankingIndex := (d.Motivation*(d.Reputation-d.Fatigue) + d.Regret)
 	return rankingIndex
 }
 
+// Utility function to get the normalized value based on the min and max
 func GetNormalizedValue(mm [2]float64, value float64) float64 {
 	min := mm[0]
 	max := mm[1]
@@ -563,6 +588,11 @@ func GetNormalizedValue(mm [2]float64, value float64) float64 {
 	return ((value - min) / (max - min))
 }
 
+// Virus mechanism in driver agent
+// If the driver has passenger, it will execute the spread mechanism
+// Whether it is spread successfully is dependent on the probability set by the user
+// If the driver has virus, it also will execute the evolve mechanism
+// Whether it is evolved successfully is dependent on the probability set by the user too.
 func (d *DriverAgent) InteractVirus(t *Task) {
 	currentTask := d.CurrentTask
 	if currentTask.Id != "null" || currentTask.Id != "nullopenpathpipepkg/pop3quitread" {
@@ -589,6 +619,9 @@ func (d *DriverAgent) InteractVirus(t *Task) {
 
 }
 
+// Calculate the ranking index based on the normalized motivation, reputation, fatigue and regret.
+// This is cruicial in deciding the task is allocated to the driver
+// Higher the index, the higher the value in task allocated to the driver
 func (d *DriverAgent) GetRankingIndexParams(
 	motivationMinMax [2]float64,
 	reputationMinMax [2]float64,

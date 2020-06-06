@@ -13,6 +13,14 @@ import (
 	"github.com/harrizontal/dispatchserver/dispatchsim"
 )
 
+// This file is important for preprocessing the ride data
+// The ride data structure is: Id, Ride start time, ride stop time, pick up lng, pick up lat, drop off lng and drop off lat
+// Pickup Lat and Lng, and Drop off Lat and Lng are heavily preprocessed towards the simulation.
+// If is not preprocessed in the beginning, it will take a lot of CPU usage and memory for the simulation programme to calculate.
+
+// Before you run this file, please input the ride data file (full path) and the name of the csv file (full path)
+// I suggest you to split the ride data file into smaller bits first as it will take some time to process.
+
 func main() {
 	rn := dispatchsim.SetupRoadNetwork2()
 	orders := runOrderRetrieve(rn)
@@ -52,13 +60,13 @@ func runOrderRetrieve(rn *dispatchsim.RoadNetwork) []dispatchsim.Order {
 		return orders[i].RideStartTime < orders[j].RideStartTime
 	})
 
+	// Generate the refined Start Coordinate, refined End Coordinate and distance between the two coordinate (in terms of road network - not straight line)
 	var correctedTasks int = 0
 	for i := 0; i < len(orders); i++ {
 		fmt.Printf("[OrderRetriever %v]Order %v, Time: %v\n", correctedTasks, orders[i].Id, orders[i].RideStartTime)
 		refinedStartCoordinate := rn.FindNearestPoint(dispatchsim.LatLng{Lat: orders[i].PickUpLat, Lng: orders[i].PickUpLng})
 		refinedEndCoordinate := rn.FindNearestPoint(dispatchsim.LatLng{Lat: orders[i].DropOffLat, Lng: orders[i].DropOffLng})
 		_, _, distance, _ := rn.GetWaypoint(refinedStartCoordinate, refinedEndCoordinate)
-		// fmt.Printf("%v %v %v\n", refinedStartCoordinate, refinedEndCoordinate, distance)
 		if (refinedStartCoordinate == dispatchsim.LatLng{} && refinedEndCoordinate == dispatchsim.LatLng{} || distance == math.Inf(1)) {
 			fmt.Printf("[OrderRetriever %v]No waypoint available for this order %v\n", correctedTasks, orders[i].Id)
 		} else {
@@ -73,6 +81,7 @@ func runOrderRetrieve(rn *dispatchsim.RoadNetwork) []dispatchsim.Order {
 	return updatedOrders
 }
 
+// Write the orders to the csv
 func writeOrdersToFile(o []dispatchsim.Order) {
 	csvFile, err := os.Create("./src/github.com/harrizontal/dispatchserver/assets/new_orders_first_1000.csv")
 
@@ -108,6 +117,5 @@ func writeOrdersToFile(o []dispatchsim.Order) {
 }
 
 func FloatToString(input_num float64) string {
-	// to convert a float number to a string
 	return strconv.FormatFloat(input_num, 'f', -1, 64)
 }

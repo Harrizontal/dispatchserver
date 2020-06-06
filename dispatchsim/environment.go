@@ -10,6 +10,7 @@ import (
 	"github.com/paulmach/orb/planar"
 )
 
+// Structure of the Environment
 type Environment struct {
 	S                       *Simulation
 	Id                      int
@@ -28,18 +29,20 @@ type Environment struct {
 	MasterSpeed             time.Duration
 	Stop                    chan struct{}
 	IsDistributing          bool
-	TasksToDrivers          int // virus
-	DriversToTasks          int // virus
-	TotalTasksToBeCompleted int
-	TotalTaskCompleted      int
+	TasksToDrivers          int // To capture the number of virus spread from tasks(passenger) to drivers
+	DriversToTasks          int // To capture the number of virus spread from drivers to tasks(passenger)
+	TotalTasksToBeCompleted int // A counter for the total tasks completed needed to be compeleted - each boundary will have a set of tasks
+	TotalTaskCompleted      int // A counter for the total tasks completed (passenger that are successfully fetched to their destination)
 }
 
 // Note that dispatcher comes at .Run() function
+// Intialize of environment
+// Please do note that environment == boundary
 func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bool, generateTasks bool, p []LatLng) Environment {
 	return Environment{
-		S:                       s,
-		Id:                      id,
-		Polygon:                 ConvertLatLngArrayToPolygon(p),
+		S:                       s,                              // The envioronment have a reference to Simulation
+		Id:                      id,                             // Each environment have an id for tracking purpose
+		Polygon:                 ConvertLatLngArrayToPolygon(p), // Each environment
 		PolygonLatLng:           p,
 		DriverAgents:            make(map[int]*DriverAgent),
 		DriverAgentMutex:        sync.RWMutex{},
@@ -60,6 +63,9 @@ func SetupEnvironment(s *Simulation, id int, noOfDrivers int, generateDrivers bo
 	}
 }
 
+// Function to "start" the environment(or boundary)
+// Each boundary have a dispatcher process and tasks distributor process
+// With the additional of the infectious spread among ride sharing system, I have added another process to simulate the mechanism of virus evolving in tasks (or passengers)
 func (e *Environment) Run() {
 	dis := SetupDispatcher(e)
 	e.Dispatcher = &dis
@@ -73,7 +79,6 @@ func (e *Environment) Run() {
 			fmt.Printf("[Environment]Task: %v/%v\n", e.TotalTaskCompleted, e.TotalTasksToBeCompleted)
 			if e.TotalTaskCompleted == e.TotalTasksToBeCompleted {
 				close(e.Stop)
-				// remove below after getting all the data
 				close(e.S.Stop)
 				e.S.isRunning = false
 				e.S.Recieve <- "[3,1]"
@@ -82,7 +87,12 @@ func (e *Environment) Run() {
 	}
 }
 
-// TODO: Do multiple days.
+// TODO: Support Multiple days. Currently it support one day only.
+// This function will act as a scheduler in "dispatching" the tasks to the boundary with respect to the simulation time
+// The data used is in sequence with respect to the time of the order starts
+// E.g There are 20 orders. First 15 orders begin at 12.01am. Last 5 orders being at 12.05am
+// If the simulation time hits 12.01am, 15 orders will appear on the map
+// When the simulation time hits 12.05am, another 15 orders will appear on the map
 func (e *Environment) RunTasksDistributor() {
 	fmt.Printf("[TasksDistributor %v]Awaiting to start\n", e.Id)
 	<-e.S.StartDispatchers
@@ -94,11 +104,10 @@ func (e *Environment) RunTasksDistributor() {
 	F:
 		for _, v := range e.TasksTimeline {
 			time := ConvertUnixToTimeStamp(v.RideStartTime) // we use RideStartTime as the start of order
-			//e.S.SendMessageToClient("Next order is at " + strconv.Itoa(time.Hour()) + ":" + strconv.Itoa(time.Minute()))
-			//fmt.Printf("[TasksDistributor %v]Task %v time %v , hour:%v, minute:%v, c.hour:%v ,c.minute:%v\n", e.Id, v.Id, time, time.Hour(), time.Minute(), currentTime.Hour(), currentTime.Minute())
+			// If the order has the same hour and minutes as the simulation time, release the order to the boundary and let the dispatcher take the order
+			// into account for the dispatcher algorithm
 			if (currentTime.Hour() == time.Hour()) && (currentTime.Minute() == time.Minute()) {
 				e.IsDistributing = true
-				//fmt.Printf("[TasksDistributor %v]Task %v sent to environment at time %v\n", e.Id, v.Id, time)
 				e.Tasks[v.Id].Appear = true // appear on the map
 				e.TaskQueue <- v            // push task to queue
 				sameOrderCount++
@@ -119,22 +128,19 @@ func (e *Environment) RunTasksDistributor() {
 }
 
 // Virus version
+// Unused function
 func (e *Environment) RunTasksDistributorVirus() {
 	fmt.Printf("[TasksDistributor %v]Awaiting to start\n", e.Id)
 	<-e.S.StartDispatchers
 	fmt.Printf("[TasksDistributor %v]Started\n", e.Id)
 	for range e.S.Ticker {
-		//fmt.Printf("[TasksDistributor %v]Time: %v\n", e.Id, e.S.SimulationTime)
 		currentTime := e.S.SimulationTime
 		sameOrderCount := 0
 	F:
 		for _, v := range e.TasksTimeline {
 			time := ConvertUnixToTimeStamp(v.RideStartTime) // we use RideStartTime as the start of order
-			//e.S.SendMessageToClient("Next order is at " + strconv.Itoa(time.Hour()) + ":" + strconv.Itoa(time.Minute()))
-			//fmt.Printf("[TasksDistributor %v]Task %v time %v , hour:%v, minute:%v, c.hour:%v ,c.minute:%v\n", e.Id, v.Id, time, time.Hour(), time.Minute(), currentTime.Hour(), currentTime.Minute())
 			if (currentTime.Hour() == time.Hour()) && (currentTime.Minute() == time.Minute()) {
 				e.IsDistributing = true
-				//fmt.Printf("[TasksDistributor %v]Task %v sent to environment at time %v\n", e.Id, v.Id, time)
 				e.Tasks[v.Id].Appear = true // appear on the map
 				e.TaskQueue <- v            // push task to queue
 				sameOrderCount++
@@ -154,6 +160,7 @@ func (e *Environment) RunTasksDistributorVirus() {
 	}
 }
 
+// For every task in the boundary, lets run the evolve virus mechanism
 func (e *Environment) RunTasksEvolveVirus() {
 	fmt.Printf("[TasksEvolver %v]Awaiting to start\n", e.Id)
 	<-e.S.StartDispatchers
@@ -172,8 +179,8 @@ func (e *Environment) RunTasksEvolveVirus() {
 	}
 }
 
-// compute average value of orders with similiar rating
-// TODO: similiar rating should be adjustable.... i think...
+// Compute average value of orders with similiar rating
+// This function is use for driveragent.go
 func (e *Environment) ComputeAverageValue(reputation float64) float64 {
 	var accumulatedTaskValue float64 = 0
 	var totalDriversWithTask = 0
@@ -197,13 +204,11 @@ func (e *Environment) ComputeAverageValue(reputation float64) float64 {
 	return averageTaskValue
 }
 
+// This function check if the point is inside the polygon
 func isPointInside(p orb.Polygon, point orb.Point) bool {
-	// for _, v := range s.Environments {
 	if planar.PolygonContains(p, point) {
-		//fmt.Printf("[isPointInsidePolygon]Point inside in Environment!\n")
 		return true
 	} else {
-		//fmt.Printf("[isPointInsidePolygon]Point not inside in Environment\n")
 		return false
 	}
 }

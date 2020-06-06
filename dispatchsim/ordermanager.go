@@ -13,6 +13,8 @@ import (
 	"github.com/paulmach/orb"
 )
 
+// Structure of the Order
+// Order is then converted into Task
 type Order struct {
 	Id              string
 	RideStartTime   string
@@ -26,7 +28,7 @@ type Order struct {
 	Distance        float64
 }
 
-// there is one and only one order retrieve in the simulation.
+// There is one and ONLY one Order Manager (or Order Retriever) in the Simulation.
 type OrderManager struct {
 	S              *Simulation
 	OrderQueue     chan Order
@@ -35,6 +37,7 @@ type OrderManager struct {
 	IsDistributing bool
 }
 
+// Intitalize the Order Retriever
 func SetupOrderRetrieve(s *Simulation) OrderManager {
 	return OrderManager{
 		S:              s,
@@ -45,6 +48,9 @@ func SetupOrderRetrieve(s *Simulation) OrderManager {
 	}
 }
 
+// This function run the Order Retriver process
+// It will read the orders (ride data) and convert into an Order object
+// Please note that the .csv file must be preprocessed first, before using implementing the file
 func (om *OrderManager) RunOrderRetriever() {
 	csvFile, err := os.Open("./src/github.com/harrizontal/dispatchserver/assets/new_orders_first_1000.csv")
 	if err != nil {
@@ -60,11 +66,9 @@ func (om *OrderManager) RunOrderRetriever() {
 		if error == io.EOF {
 			break
 		} else if error != nil {
-			fmt.Printf("Error in reading file. \n")
+			fmt.Printf("[Order Retriever]Error in reading file. \n")
 			log.Fatal(error)
 		}
-
-		//_, _, distance, _ := om.S.RN.GetWaypoint(LatLng{Lng: ParseFloatResult(line[7]), Lat: ParseFloatResult(line[8])}, LatLng{Lng: ParseFloatResult(line[9]), Lat: ParseFloatResult(line[10])})
 
 		o := &Order{
 			Id:              line[0],
@@ -81,7 +85,6 @@ func (om *OrderManager) RunOrderRetriever() {
 
 		orders = append(orders, *o)
 
-		//fmt.Printf("[OrderRetriever]Order %v. Start at time: %v\n", o.Id, o.RideStartTime)
 	}
 
 	om.UpdatedOrders = orders
@@ -99,7 +102,8 @@ func (om *OrderManager) RunOrderRetriever() {
 	go om.RunOrderDistributorVirus()
 }
 
-// combine sendOrderToEnvironments with runOrderDistributer
+// This function will distributed the order to the environment (or boundaries)
+// This function is not used - See RunOrderDistrubotrVirus
 func (om *OrderManager) RunOrderDistributor() {
 	fmt.Printf("[OrderDistributor]Distributing orders to environment...\n")
 
@@ -122,7 +126,8 @@ func (om *OrderManager) RunOrderDistributor() {
 	fmt.Printf("[OrderDistributor]Finish distributing orders to environment...\n")
 }
 
-// virus
+// This function will distributed the order to the environment (or boundaries)
+// This function is USED as it is split the proportion of the virus infected or not infected in tasks, and the masks wore by passengers
 func (om *OrderManager) RunOrderDistributorVirus() {
 	fmt.Printf("[OrderDistributor]Distributing orders to environment...\n")
 
@@ -133,13 +138,18 @@ func (om *OrderManager) RunOrderDistributorVirus() {
 	fmt.Printf("[OrderDistributor]Every %v of infected tasks, there is %v tasks wearing mask %v\n", infectedTasks, infectedTasksWithMasks, float64(float64(om.S.VirusParameters.PassengerMask)/100))
 	fmt.Printf("[OrderDistributor]Every %v healthy tasks, there is %v tasks wearing masks\n", float64(10-int(infectedTasks)), tasksWithMasks)
 	i := 0
+
+	// For each order, we distribute the order to TasksTimeline in the environment
+	// TasksTimeLine holds the list of order in sequential to the time.
 	for _, o := range om.UpdatedOrders {
 	K:
 		for _, e := range om.S.Environments {
+			// If the order is in the boundary, let's distribute the order to the boundary.
+
 			if isPointInside(e.Polygon, orb.Point{o.StartCoordinate.Lng, o.StartCoordinate.Lat}) {
 				if math.Mod(float64(i), 10) <= infectedTasks-1 { // task with virus
 					if math.Mod(float64(i), infectedTasks) <= float64(infectedTasksWithMasks-1) { // task with mask
-						task := CreateVirusTaskFromOrder(o, e, Mild, true)
+						task := CreateVirusTaskFromOrder(o, e, Mild, true) // Create task with Mild virus level and with mask
 						fmt.Printf("%v Task - Virus %v, Mask %v\n", i, task.Virus, task.Mask)
 						e.TasksTimeline = append(e.TasksTimeline, task)
 						e.Tasks[task.Id] = &task
@@ -149,7 +159,7 @@ func (om *OrderManager) RunOrderDistributorVirus() {
 						e.TasksTimeline = append(e.TasksTimeline, task)
 						e.Tasks[task.Id] = &task
 					}
-				} else { // tasks with virus
+				} else { // tasks with NO virus
 					if math.Mod(float64(i), 10) <= infectedTasks+tasksWithMasks-1 { // task with mask
 						task := CreateVirusTaskFromOrder(o, e, None, true)
 						fmt.Printf("%v Task - Virus %v, Mask %v\n", i, task.Virus, task.Mask)
@@ -168,6 +178,9 @@ func (om *OrderManager) RunOrderDistributorVirus() {
 		}
 	}
 
+	// Once the orders (or tasks in this case, because its converted from Order to task via CreateVirusTaskFromOrder) is distributed to the
+	// environment, lets update the TotalTaskToBeCompleted in the environment.
+	// This will let the simulation know when to stop the simulation
 	for _, e := range om.S.Environments {
 		fmt.Printf("[OrderDistributor]Environment %v has %v\n", e.Id, len(e.TasksTimeline))
 		e.TotalTasksToBeCompleted = len(e.TasksTimeline)

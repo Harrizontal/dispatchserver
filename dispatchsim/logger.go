@@ -11,6 +11,7 @@ var (
 	Log *log.Logger
 )
 
+// Intialize the logger for dispatcher to log its data to the .log file
 func initLogger() {
 	// set location of log file
 	var logpath = build.Default.GOPATH + "/src/github.com/harrizontal/dispatchserver/assets/driver/dispatcher.log"

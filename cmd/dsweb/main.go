@@ -83,7 +83,6 @@ var simulator = dispatchsim.SetupSimulation()
 // Main function to run the simulation
 // go run github.com/harrizontal/dispatchserver/cmd/dsweb
 func main() {
-	fmt.Println("[Server] Proceed to run simulation...")
 	go simulator.Run()
 	setupRoutes()
 	log.Fatal(http.ListenAndServe(":8080", nil))

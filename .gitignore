@@ -17,6 +17,10 @@
 # Project-local glide cache, RE: https://github.com/Masterminds/glide/issues/736
 .glide/
 
-assets/
+assets/*
+!assets/driver
+!assets/virus
+!assets/chengdu_3_osm.json
+!assets/new_orders_first_1000.csv
 # Dependency directories (remove the comment below to include it)
 # vendor/

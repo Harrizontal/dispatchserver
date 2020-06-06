@@ -116,6 +116,7 @@ func SetupSimulation() Simulation {
 }
 
 func (s *Simulation) Run() {
+	fmt.Println("[Server] Proceed to run simulation...")
 	var environmentId = 1 // starting id
 	var noOfDrivers = 0
 	var startingDriverCount = 1 // starting id of driver
@@ -239,7 +240,7 @@ func (s *Simulation) SendMapData() {
 }
 
 func (s *Simulation) SendStats() {
-	fmt.Printf("[Simulator]sendStats started \n")
+	fmt.Printf("[Simulator]SendStats started \n")
 	tick := time.Tick((s.UpdateStatsSpeed) * time.Millisecond)
 	for {
 		select {

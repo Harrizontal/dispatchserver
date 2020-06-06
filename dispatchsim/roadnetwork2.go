@@ -147,32 +147,6 @@ func (rn *RoadNetwork) ProcessJSONFile() {
 	}
 }
 
-// func testGonum() {
-// 	g := simple.NewWeightedUndirectedGraph(0, math.Inf(1))
-// 	var x1, x2, x3, x4, x5 simple.Node = 1, 2, 3, 4, 5
-// 	// g.AddNode(x)
-// 	// g.AddNode(x2)
-// 	// g.AddNode(x3)
-// 	// g.AddNode(x4)
-// 	y := simple.WeightedEdge{F: x1, T: x2, W: 12.0}
-// 	y2 := simple.WeightedEdge{F: x2, T: x3, W: 12.0}
-// 	y3 := simple.WeightedEdge{F: x1, T: x4, W: 12.0}
-// 	y4 := simple.WeightedEdge{F: x3, T: x4, W: 10}
-// 	y5 := simple.WeightedEdge{F: x4, T: x5, W: 1}
-// 	g.SetWeightedEdge(y)
-// 	g.SetWeightedEdge(y2)
-// 	g.SetWeightedEdge(y3)
-// 	g.SetWeightedEdge(y4)
-// 	g.SetWeightedEdge(y5)
-
-// 	// a, e := path.AStar(x1, x5, g, rn.returnR)
-// 	// fmt.Println(a.To(4))
-// 	// fmt.Println(e)
-// 	// fmt.Println(a.From())
-// 	// fmt.Println(g.Node(5).ID)
-
-// }
-
 func (rn *RoadNetwork) returnR(x, y graph.Node) float64 {
 	fromNode := rn.Nodes[x.ID()] // get node from map
 	toNode := rn.Nodes[y.ID()]   // get node from map
@@ -201,7 +175,7 @@ func (rn *RoadNetwork) PopulateGraph() {
 	}
 	elapsed := time.Since(start)
 	fmt.Printf("[RoadNetwork - PopulateGraph]Graph populated - nodes:%v links:%v\n", len(rn.Nodes), len(rn.Links))
-	fmt.Printf("[RoadNetwork - PopulateGraph]Generating road network took %s\n. Road network generated.", elapsed)
+	fmt.Printf("[RoadNetwork - PopulateGraph]Generating road network took %s. Road network generated.\n", elapsed)
 
 }
 

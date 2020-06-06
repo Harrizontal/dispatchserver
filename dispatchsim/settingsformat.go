@@ -15,22 +15,26 @@ type SettingsFormat struct {
 	TaskParameters       TaskParametersFormat       `json:"task_parameters"`
 	DispatcherParameters DispatcherParametersFormat `json:"dispatcher_parameters"`
 	VirusParameters      VirusParameters            `json:"virus_parameters"`
+	DriverParameters     DriverParamatersFormat     `json:"driver_parameters"`
 }
 
 type TaskParametersFormat struct {
-	TaskValueType       string  `json:"task_value_type"` // done
-	ValuePerKM          float64 `json:"value_per_km"`    // done
+	TaskValueType       string  `json:"task_value_type"`
+	ValuePerKM          float64 `json:"value_per_km"`
 	PeakHourRate        float64 `json:"peak_hour_rate"`
 	ReputationGivenType string  `json:"reputation_given_type"`
 	ReputationValue     float64 `json:"reputation_value"`
 }
 
 type DriverParamatersFormat struct {
+	TravellingMode string  `json:"travelling_mode"`   // node/distance
+	TravelInterval int     `json:"travel_interval"`   // travel interval
+	SpeedKmPerHour float64 `json:"speed_km_per_hour"` // distance
 }
 
 type DispatcherParametersFormat struct {
-	DispatchInterval  int     `json:"dispatcher_interval"` // done
-	SimilarReputation float64 `json:"similiar_reputation`
+	DispatchInterval  int     `json:"dispatcher_interval"`
+	SimilarReputation float64 `json:"similar_reputation"`
 }
 
 // ---- future improvement ----

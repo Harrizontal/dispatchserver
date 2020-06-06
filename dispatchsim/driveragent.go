@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/paulmach/orb"
@@ -48,12 +49,14 @@ type DriverAgent struct {
 	Reputation          float64
 	Fatigue             float64
 	Regret              float64
+	RankingIndex        float64
 	ChangeDestination   chan string
 	StartDriving        time.Time
 	EndDriving          time.Time
 	Valid               bool
 	Virus               Virus // virus
 	Mask                bool  // virus
+	DriverMutex         sync.RWMutex
 }
 
 func CreateMultipleDrivers(startingDriverId, n int, e *Environment, s *Simulation) {
@@ -89,6 +92,7 @@ func CreateDriver(id int, e *Environment, s *Simulation) DriverAgent {
 		Regret:            0,
 		ChangeDestination: make(chan string),
 		Valid:             true,
+		DriverMutex:       sync.RWMutex{},
 	}
 }
 
@@ -162,13 +166,15 @@ func CreateVirusDriver(id int, e *Environment, s *Simulation, v Virus, mask bool
 		TasksCompleted:    0,
 		TaskHistory:       make([]Task, 0),
 		Motivation:        100,
-		Reputation:        5,
+		Reputation:        0,
 		Fatigue:           0,
 		Regret:            0,
+		RankingIndex:      0,
 		ChangeDestination: make(chan string),
 		Valid:             true,
 		Virus:             v,
 		Mask:              mask,
+		DriverMutex:       sync.RWMutex{},
 	}
 }
 
@@ -180,8 +186,7 @@ func (d *DriverAgent) Migrate() bool {
 	if !inside {
 		for _, v := range d.E.S.Environments {
 			inside2 := isPointInside(v.Polygon, point)
-			if inside2 {
-
+			if inside2 && d.Status != Allocating { // If is allocating, it should not migrate.
 				d.E.DriverAgentMutex.Lock()
 				delete(d.E.DriverAgents, d.Id)
 				d.E.DriverAgentMutex.Unlock()
@@ -200,7 +205,11 @@ func (d *DriverAgent) Migrate() bool {
 
 func (d *DriverAgent) ProcessTask3() {
 	<-d.S.StartDrivers // close(StartDrivers) to start this function
-	go d.Drive3()
+	if d.E.S.DriverParameters.TravellingMode == "node" {
+		go d.Drive3()
+	} else {
+		go d.DriveDistance()
+	}
 	go d.RunComputeRegret()
 	sdw := &StartDestinationWaypoint{}  // driver current position to task start
 	sdw2 := &StartDestinationWaypoint{} // task start to task end
@@ -239,7 +248,7 @@ func (d *DriverAgent) ProcessTask3() {
 					d.CurrentTask = d.PendingTask
 					d.PendingTask = Task{Id: "null", FinalValue: 0.00} // bad way...
 					d.Status = Fetching
-					// uncomment the below one line code if shit gone mad
+
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Dispatcher.Response <- DriverMatchingResult{Accept: true, Id: d.Id}
 					//d.E.S.Environments[d.CurrentTask.EnvironmentId].TaskMutex.Lock()
 					d.E.S.Environments[d.CurrentTask.EnvironmentId].Tasks[d.CurrentTask.Id].WaitStart = d.E.S.SimulationTime
@@ -305,13 +314,10 @@ func (d *DriverAgent) ProcessTask3() {
 }
 
 func (d *DriverAgent) Drive3() {
-
-	tick := time.Tick(50 * time.Millisecond)
-	//fmt.Printf("[Driver %v]Intializing driver with random location\n", d.Id)
-	start := d.S.RN.G_GetRandomLocation()
+	// 50 miliseconds
+	tick := time.Tick(time.Duration(d.E.S.DriverParameters.TravelInterval) * time.Millisecond)
+	start := d.S.RN.GetRandomLocation()
 	d.CurrentLocation = start
-	//fmt.Printf("[Driver %v]Done\n", d.Id)
-
 	for {
 		//K:
 	K:
@@ -327,8 +333,31 @@ func (d *DriverAgent) Drive3() {
 				break K
 			default:
 				d.DriveToNextPoint4()
-				// virus function
-				d.InteractVirus(&d.CurrentTask)
+				d.InteractVirus(&d.CurrentTask) // virus function
+			}
+
+		}
+	}
+	panic("[Driver]unreachable\n")
+}
+
+func (d *DriverAgent) DriveDistance() {
+	start := d.S.RN.GetRandomLocation()
+	d.CurrentLocation = start
+	for {
+		select {
+		case <-d.E.S.Stop:
+			return
+		default:
+			select {
+			case m := <-d.Recieve:
+				d.CurrentLocation = m.StartDestinationWaypoint.StartLocation
+				d.DestinationLocation = m.StartDestinationWaypoint.DestinationLocation
+				d.Waypoint = m.StartDestinationWaypoint.Waypoint
+				//break K
+			default:
+				d.DriveToNextPointDistance()
+				//d.InteractVirus(&d.CurrentTask) // virus function
 			}
 
 		}
@@ -339,7 +368,7 @@ func (d *DriverAgent) Drive3() {
 func (d *DriverAgent) GetWayPoint() {
 	fmt.Printf("[Driver %d - %v]Getting waypoint\n", d.Id, d.Status)
 	startTime := time.Now()
-	start, end, distance, waypoints := d.S.RN.G_GetWaypoint(d.CurrentLocation, d.DestinationLocation)
+	start, end, distance, waypoints := d.S.RN.GetWaypoint(d.CurrentLocation, d.DestinationLocation)
 	if distance == math.Inf(1) {
 		fmt.Printf("start:%v end:%v distance: %v waypoints: %v\n", start, end, distance, len(waypoints))
 		panic("waypoint is 0")
@@ -369,7 +398,6 @@ func (d *DriverAgent) GetWayPoint() {
 }
 
 func (d *DriverAgent) DriveToNextPoint4() {
-	//fmt.Printf("[Driver %d] DriveToNextPoint\n", d.Id)
 	switch noOfWaypoints := len(d.Waypoint); {
 	case noOfWaypoints >= 2:
 		d.CurrentLocation = d.Waypoint[0]
@@ -380,30 +408,47 @@ func (d *DriverAgent) DriveToNextPoint4() {
 	case noOfWaypoints == 0:
 		// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
 		if d.Status == Roaming || d.Status == Matching || d.Status == Allocating {
-			//fmt.Printf("[Driver %d] Go random location\n", d.Id)
-			//startTime := time.Now()
-			nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
+			//time.Sleep(20 * time.Millisecond)
+			nextLocation := d.S.RN.GetNextPoint(d.CurrentLocation)
 			d.CurrentLocation = nextLocation
-			//end := time.Since(startTime)
-			//fmt.Printf("[Driver %d - %v]Random %s\n", d.Id, d.Status, end)
+		}
+	}
+}
 
-			// start, end, waypoints := d.S.RN.G_GetEndWaypoint(d.CurrentLocation)
-			// fmt.Printf("[Driver %v]Sending Random Waypoints: %v\n", d.Id, len(waypoints))
-			// d.CurrentLocation = start
-			// d.DestinationLocation = end
-			// if len(waypoints) > 1 {
-			// 	d.Waypoint = waypoints[1:]
-			// }
-		} else {
-			//nextLocation := d.S.RN.G_GetNextPoint(d.CurrentLocation)
-			//d.CurrentLocation = nextLocation
-			//fmt.Printf("[Driver %d - %v]No road to go\n", d.Id, d.Status)
+func (d *DriverAgent) DriveToNextPointDistance() {
+	switch noOfWaypoints := len(d.Waypoint); {
+	case noOfWaypoints >= 2:
+		d.CurrentLocation = d.Waypoint[0]
+		distance := CalculateDistance(d.Waypoint[0], d.Waypoint[1])
+		timeInSeconds := caluclateTime(distance, d.E.S.DriverParameters.SpeedKmPerHour)
+		updatedTime := timeInSeconds * d.S.TickerTime * 2
+		time.Sleep(time.Duration(updatedTime) * time.Millisecond)
+		d.CurrentLocation = d.Waypoint[0]
+		d.Waypoint = d.Waypoint[1:]
+	case noOfWaypoints == 1:
+		distance := CalculateDistance(d.CurrentLocation, d.Waypoint[0])
+		timeInSeconds := caluclateTime(distance, d.E.S.DriverParameters.SpeedKmPerHour)
+		updatedTime := timeInSeconds * d.S.TickerTime * 2
+		time.Sleep(time.Duration(updatedTime) * time.Millisecond)
+		d.CurrentLocation = d.Waypoint[0]
+		d.Waypoint = d.Waypoint[:0]
+	case noOfWaypoints == 0:
+		// TODO: Keep the nextLocation. When route is created, go the past random nextLocation, then the actual waypoint
+		if d.Status == Roaming || d.Status == Matching || d.Status == Allocating {
+			nextLocation := d.S.RN.GetNextPoint(d.CurrentLocation)
+
+			distance := CalculateDistance(d.CurrentLocation, nextLocation)
+			timeInSeconds := caluclateTime(distance, d.E.S.DriverParameters.SpeedKmPerHour)
+			updatedTime := timeInSeconds * 200
+			time.Sleep(time.Duration(updatedTime) * time.Millisecond)
+
+			d.CurrentLocation = nextLocation
 		}
 	}
 }
 
 func (d *DriverAgent) DriveRandom() {
-	_, _, waypoints := d.S.RN.G_GetEndWaypoint(d.CurrentLocation)
+	_, _, waypoints := d.S.RN.GetEndWaypoint(d.CurrentLocation)
 	// d.Waypoint = waypoints
 	fmt.Printf("[Driver %v]Sending Random Waypoints: %v\n", d.Id, len(waypoints))
 	d.RecieveNewRoute <- waypoints
@@ -412,18 +457,6 @@ func (d *DriverAgent) DriveRandom() {
 // Accept rate
 func (d *DriverAgent) AcceptRide() bool {
 	return true
-	// min := 0
-	// max := 1
-	// rand.Seed(time.Now().UnixNano())
-	// n := min + rand.Intn(max-min+1)
-	// if n == 0 {
-	// 	d.CurrentTask.WaitStart = time.Now()
-	// 	fmt.Println("Driver " + strconv.Itoa(d.Id) + " accepted ride")
-	// 	return true
-	// } else {
-	// 	fmt.Println("Driver " + strconv.Itoa(d.Id) + " declined ride")
-	// 	return false
-	// }
 }
 
 func (d *DriverAgent) ReachTaskPosition() (bool, bool) {
@@ -448,33 +481,30 @@ func (d *DriverAgent) ReachTaskDestination() (bool, bool) {
 func (d *DriverAgent) CompleteTask() (bool, bool) {
 
 	d.TotalEarnings += d.CurrentTask.FinalValue
-	getRating := d.CurrentTask.ComputeRating(d.S)
-	//fmt.Printf("[CompleteTask]Task %v with value of %d gave Driver %d a rating of %f \n", d.CurrentTask.Id, d.CurrentTask.Value, d.Id, getRating)
 
-	var updatedRating float64 = 0
-	// if d.TasksCompleted > 0 {
-	// 	updatedRating = (d.Reputation + getRating) / 2
-	// } else {
-	// 	updatedRating = getRating
-	// }
-	updatedRating = (d.Reputation + getRating) / 2
+	d.CurrentTask.ComputeRating(d.S) //
 
-	updatedTaskCompleted := d.TasksCompleted + 1
+	d.TaskHistory = append(d.TaskHistory, d.CurrentTask) // add current task to taskhistory since the driver agent has already completed the task
+	d.TasksCompleted += d.TasksCompleted + 1             // increment count of TaskCompleted
+	d.RecomputeReputation()                              // recompute reputation of driver
 
-	d.TasksCompleted = updatedTaskCompleted
-	d.Reputation = updatedRating
-	d.TaskHistory = append(d.TaskHistory, d.CurrentTask)
 	d.CurrentTask = Task{Id: "null", FinalValue: 0.00}
 
 	return true, true
 }
 
-// use goroutines?
+func (d *DriverAgent) RecomputeReputation() {
+	rating := 0.00
+	for _, t := range d.TaskHistory {
+		rating = rating + t.RatingGiven
+	}
+	d.Reputation = rating / float64(len(d.TaskHistory))
+}
+
 func (d *DriverAgent) ComputeFatigue() {
 	d.Fatigue = d.Fatigue + 1
 }
 
-// use goroutines?
 func (d *DriverAgent) ComputeMotivation() {
 	d.Motivation = d.Motivation
 }
@@ -482,7 +512,8 @@ func (d *DriverAgent) ComputeMotivation() {
 //
 
 func (d *DriverAgent) RunComputeRegret() {
-	x := time.Tick(d.E.S.UpdateMapSpeed * time.Millisecond)
+	// d.E.S.UpdateMapSpeed
+	x := time.Tick(d.E.S.RegretTickerTime * time.Millisecond)
 	for {
 		select {
 		case <-d.E.S.Stop:
@@ -493,12 +524,8 @@ func (d *DriverAgent) RunComputeRegret() {
 	}
 }
 
-// use goroutines? no...
 func (d *DriverAgent) ComputeRegret() {
-	//fmt.Printf("Computing Regret for Driver %d - Env %d\n", d.Id, d.E.Id)
 	averageValueOfOrders := d.S.ComputeAverageValue(d)
-	//fmt.Printf("[Driver %d]Regret now: %f, Value of Order: %f, Average value of Orders: %f\n", d.Id, d.Regret, float64(d.CurrentTask.FinalValue), averageValueOfOrders)
-	// Driver's current regret - current task's value + average value of orders which other drivers take at the point of time (with similar reputation)
 	computedRegret := d.Regret - float64(d.CurrentTask.FinalValue) + averageValueOfOrders
 
 	if computedRegret < 0 {
@@ -506,28 +533,22 @@ func (d *DriverAgent) ComputeRegret() {
 	} else {
 		d.Regret = computedRegret
 	}
-	//fmt.Printf("[Driver %d]Regret Calculated: %f\n", d.Id, d.Regret)
+
 }
 
 func (d *DriverAgent) GetRankingIndex(mmRepFat *[2][2]float64) float64 {
 	var rankingIndex float64 = 0
-	// if d.TasksCompleted > 0 {
-	// 	rankingIndex = (d.Motivation * (d.Reputation - d.Fatigue)) + d.Regret
-	// } else {
-	// 	rankingIndex = (d.Motivation + d.Regret)
-	// }
 
 	reputation := GetNormalizedValue(mmRepFat[0], d.Reputation)
 	fatigue := GetNormalizedValue(mmRepFat[1], d.Fatigue)
 
 	rankingIndex = (d.Motivation*(reputation-fatigue) + d.Regret)
-	//rankingIndex = (d.Motivation * (d.Reputation - d.Fatigue)) + d.Regret
-
-	// fmt.Printf("[GetRankingIndex]Driver %d's stats - Motivation:%v, Reputation:%v(%v), Fatigue:%v(%v), Regret:%v, RankingIndex:%v\n",
-	// 	d.Id, d.Motivation, d.Reputation, reputation, d.Fatigue, fatigue, d.Regret, rankingIndex)
 	return rankingIndex
+}
 
-	// todo : norminlize reputation and fatigue
+func (d *DriverAgent) GetRawRankingIndex() float64 {
+	rankingIndex := (d.Motivation*(d.Reputation-d.Fatigue) + d.Regret)
+	return rankingIndex
 }
 
 func GetNormalizedValue(mm [2]float64, value float64) float64 {
@@ -536,7 +557,7 @@ func GetNormalizedValue(mm [2]float64, value float64) float64 {
 
 	// if max and min happen to be same, means all drivers have the same rating. Hence, this value meant nothing in the resultant equation
 	if min == max {
-		return 0
+		return 1
 	}
 
 	return ((value - min) / (max - min))
@@ -544,11 +565,12 @@ func GetNormalizedValue(mm [2]float64, value float64) float64 {
 
 func (d *DriverAgent) InteractVirus(t *Task) {
 	currentTask := d.CurrentTask
-	if currentTask.Id != "null" {
+	if currentTask.Id != "null" || currentTask.Id != "nullopenpathpipepkg/pop3quitread" {
 		if d.Virus == None && t.Virus == None {
 			return
 		} else if d.Virus != None && d.Status == Travelling && t.Virus == None { // Driver spreading virus to passengers
 			if SpreadVirus(d.S.VirusParameters, d.Mask) && d.Virus.InAir(d.S.VirusParameters) && RecieveVirus(d.S.VirusParameters, t.Mask) {
+				fmt.Printf("current task - env: %v, id: %v\n", currentTask.EnvironmentId, currentTask.Id)
 				d.E.S.Environments[currentTask.EnvironmentId].Tasks[currentTask.Id].Virus = Mild
 				t.Virus = Mild
 				d.E.DriversToTasks++
@@ -565,4 +587,25 @@ func (d *DriverAgent) InteractVirus(t *Task) {
 		d.Virus = d.Virus.Evolve(d.S.VirusParameters)
 	}
 
+}
+
+func (d *DriverAgent) GetRankingIndexParams(
+	motivationMinMax [2]float64,
+	reputationMinMax [2]float64,
+	fatigueMinMax [2]float64,
+	regretMinMax [2]float64,
+	motivation float64,
+	reputation float64,
+	fatigue float64,
+	regret float64,
+) float64 {
+	var rankingIndex float64 = 0
+
+	newMotivation := GetNormalizedValue(motivationMinMax, d.Reputation)
+	newReputation := GetNormalizedValue(reputationMinMax, reputation)
+	newFatigue := GetNormalizedValue(fatigueMinMax, fatigue)
+	newRegret := GetNormalizedValue(regretMinMax, regret)
+
+	rankingIndex = (newMotivation*(newReputation-newFatigue) + newRegret)
+	return rankingIndex
 }

@@ -64,7 +64,7 @@ func (om *OrderManager) RunOrderRetriever() {
 			log.Fatal(error)
 		}
 
-		//_, _, distance, _ := om.S.RN.G_GetWaypoint(LatLng{Lng: ParseFloatResult(line[7]), Lat: ParseFloatResult(line[8])}, LatLng{Lng: ParseFloatResult(line[9]), Lat: ParseFloatResult(line[10])})
+		//_, _, distance, _ := om.S.RN.GetWaypoint(LatLng{Lng: ParseFloatResult(line[7]), Lat: ParseFloatResult(line[8])}, LatLng{Lng: ParseFloatResult(line[9]), Lat: ParseFloatResult(line[10])})
 
 		o := &Order{
 			Id:              line[0],

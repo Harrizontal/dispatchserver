@@ -134,3 +134,26 @@ func ConvertLatLngArrayToPolygon(ll []LatLng) orb.Polygon {
 	poly = append(poly, ring)
 	return poly
 }
+
+// return [min,max]
+func CalculateMinMax(numbers []float64) [2]float64 {
+	first := false
+	var setMin float64 = 0
+	var setMax float64 = 0
+	for _, v := range numbers {
+		if !first {
+			setMin = v
+			setMax = v
+			first = true
+		}
+
+		if v < setMin {
+			setMin = v
+		}
+
+		if v > setMax {
+			setMax = v
+		}
+	}
+	return [2]float64{setMin, setMax}
+}

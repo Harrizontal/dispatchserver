@@ -55,9 +55,9 @@ func runOrderRetrieve(rn *dispatchsim.RoadNetwork) []dispatchsim.Order {
 	var correctedTasks int = 0
 	for i := 0; i < len(orders); i++ {
 		fmt.Printf("[OrderRetriever %v]Order %v, Time: %v\n", correctedTasks, orders[i].Id, orders[i].RideStartTime)
-		refinedStartCoordinate := rn.G_FindNearestPoint(dispatchsim.LatLng{Lat: orders[i].PickUpLat, Lng: orders[i].PickUpLng})
-		refinedEndCoordinate := rn.G_FindNearestPoint(dispatchsim.LatLng{Lat: orders[i].DropOffLat, Lng: orders[i].DropOffLng})
-		_, _, distance, _ := rn.G_GetWaypoint(refinedStartCoordinate, refinedEndCoordinate)
+		refinedStartCoordinate := rn.FindNearestPoint(dispatchsim.LatLng{Lat: orders[i].PickUpLat, Lng: orders[i].PickUpLng})
+		refinedEndCoordinate := rn.FindNearestPoint(dispatchsim.LatLng{Lat: orders[i].DropOffLat, Lng: orders[i].DropOffLng})
+		_, _, distance, _ := rn.GetWaypoint(refinedStartCoordinate, refinedEndCoordinate)
 		// fmt.Printf("%v %v %v\n", refinedStartCoordinate, refinedEndCoordinate, distance)
 		if (refinedStartCoordinate == dispatchsim.LatLng{} && refinedEndCoordinate == dispatchsim.LatLng{} || distance == math.Inf(1)) {
 			fmt.Printf("[OrderRetriever %v]No waypoint available for this order %v\n", correctedTasks, orders[i].Id)

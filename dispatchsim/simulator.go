@@ -7,6 +7,7 @@ import (
 	"log"
 	"math"
 	"os"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -29,16 +30,20 @@ type Simulation struct {
 	UpdateMapSpeed        time.Duration // settings
 	DispatcherSpeed       time.Duration
 	UpdateStatsSpeed      time.Duration
-	TickerTime            time.Duration
+	TickerTime            int
 	Ticker                <-chan time.Time
+	AddTime               time.Duration
+	RegretTickerTime      time.Duration
 	SimulationTime        time.Time
 	TaskParameters        TaskParametersFormat
 	DispatcherParameters  DispatcherParametersFormat
 	VirusParameters       VirusParameters
+	DriverParameters      DriverParamatersFormat
 	StartDrivers          chan interface{} // start
 	StartDispatchers      chan interface{} // start
 	Stop                  chan interface{} // stop the simuation
 	StatsVirus            []StatsVirusFormat
+	StatsDriver           []StatsIndividualDrivers
 	CaptureSimulationTime time.Time
 }
 
@@ -54,7 +59,13 @@ func SetupSimulation() Simulation {
 
 	defaultDispatcherParameters := DispatcherParametersFormat{
 		DispatchInterval:  5000,
-		SimilarReputation: 0.5,
+		SimilarReputation: 5,
+	}
+
+	defaultDriverParameters := DriverParamatersFormat{
+		TravellingMode: "node",
+		TravelInterval: 50,
+		SpeedKmPerHour: 120,
 	}
 
 	defaultVirusParams := VirusParameters{
@@ -67,7 +78,10 @@ func SetupSimulation() Simulation {
 		MaskEffectiveness:                95,
 	}
 
-	tickerTime := time.Duration(100) // make it adjustable
+	tickerTime := 10 // make it adjustable
+	tickerTime2 := time.Duration(tickerTime)
+	AddTime := time.Duration(5000)                    // half a second of simulation time
+	RejectTickerTime := time.Duration(tickerTime * 2) // 1sec of simulation time
 
 	return Simulation{
 		isRunning:             false,
@@ -83,16 +97,20 @@ func SetupSimulation() Simulation {
 		UpdateMapSpeed:        200,  // update speed to mapbox
 		DispatcherSpeed:       5000,
 		UpdateStatsSpeed:      1000,
-		TickerTime:            tickerTime,
-		Ticker:                time.Tick(tickerTime * time.Millisecond),         // TODO: Make adjustable - 20 millisecond -> increase by 1 min
+		TickerTime:            tickerTime,                                // 100ms
+		Ticker:                time.Tick(tickerTime2 * time.Millisecond), // 100ms real time-> half a second in simulation time
+		AddTime:               AddTime,
+		RegretTickerTime:      RejectTickerTime,
 		SimulationTime:        time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local), // TODO: Make adjustable
 		TaskParameters:        defaultTaskParameters,
 		DispatcherParameters:  defaultDispatcherParameters,
 		VirusParameters:       defaultVirusParams,
+		DriverParameters:      defaultDriverParameters,
 		StartDrivers:          make(chan interface{}),
 		StartDispatchers:      make(chan interface{}),
 		Stop:                  make(chan interface{}),
 		StatsVirus:            make([]StatsVirusFormat, 0),
+		StatsDriver:           make([]StatsIndividualDrivers, 0),
 		CaptureSimulationTime: time.Date(2020, 1, 23, 00, 05, 0, 0, time.Local),
 	}
 }
@@ -129,7 +147,11 @@ func (s *Simulation) Run() {
 					s.TaskParameters = sf.TaskParameters
 					s.DispatcherParameters = sf.DispatcherParameters
 					s.VirusParameters = sf.VirusParameters
-					fmt.Printf("%v\n", sf.VirusParameters)
+					s.DriverParameters = sf.DriverParameters
+					fmt.Printf("Task: %v\n", sf.TaskParameters)
+					fmt.Printf("Dispatcher: %v\n", sf.DispatcherParameters)
+					fmt.Printf("Driver: %v\n", sf.DriverParameters)
+					fmt.Printf("Virus: %v\n", sf.VirusParameters)
 					s.SendMessageToClient("Parameters applied")
 				}
 
@@ -160,6 +182,7 @@ func (s *Simulation) Run() {
 						go s.StartTimer()
 						start = true
 						s.SendMessageToClient("Simulation started")
+						initLogger()
 					} else {
 						if start == true {
 							//s.SendMessageToClient("Invalid command as simulation has started")
@@ -170,7 +193,7 @@ func (s *Simulation) Run() {
 						}
 
 					}
-				case 1: // pickup lnglat and drop off lnglat in terms of waypoint
+				case 1: // Generating virus csv
 					if s.isRunning == false && start == true {
 						s.SendMessageToClient("Generating virus csv")
 						s.GenerateVirusCSV()
@@ -184,6 +207,13 @@ func (s *Simulation) Run() {
 						s.OM = &om
 						go om.RunOrderRetriever()
 						s.SendMessageToClient("Retrieving orders")
+					}
+				case 3:
+					if s.isRunning == false && start == true {
+						s.SendMessageToClient("Generating driver's stats csv")
+						s.GenerateIndividualDriverCSV()
+					} else {
+						s.SendMessageToClient("Unable to generate virus csv. Simulation running")
 					}
 				}
 			}
@@ -219,23 +249,23 @@ func (s *Simulation) SendStats() {
 			if s.isRunning {
 				SendDriverStats(s)
 				SendEnvironmentStats(s)
+
+				if s.CaptureSimulationTime.Hour() != s.SimulationTime.Hour() || s.CaptureSimulationTime.Minute() != s.SimulationTime.Minute() {
+					s.CaptureSimulationTime = s.SimulationTime
+				}
 			}
 		}
 	}
 }
 
-// TODO: Reputation
 func (s *Simulation) ComputeAverageValue(d *DriverAgent) float64 {
 	var accumulatedTaskValue float64 = 0
 	var totalDriversWithTask = 0
 
+	upperLimit := d.Reputation + s.DispatcherParameters.SimilarReputation
+	lowerLimit := d.Reputation - s.DispatcherParameters.SimilarReputation
 	for _, v := range s.DriverAgents {
-		if v.Id != d.Id {
-			// fmt.Printf("[ComputeAverageValue]Driver %d has Task %v with value of %v \n",
-			// 	v.Id,
-			// 	v.CurrentTask.Id,
-			// 	v.CurrentTask.FinalValue,
-			// )
+		if v.Id != d.Id && lowerLimit <= v.Reputation && v.Reputation <= upperLimit {
 			accumulatedTaskValue = v.CurrentTask.FinalValue + accumulatedTaskValue
 			totalDriversWithTask++
 		}
@@ -538,6 +568,13 @@ func SendDriverStats(s *Simulation) {
 	var totalCurrentEarning float64 = 0
 	var maxCurrentEarning float64 = 0
 	validCurrentDrivers := 0
+
+	// for CSV - driver stats
+	sid := &StatsIndividualDrivers{
+		Time:        simTime,
+		DriverStats: make([]DriverRegretFormat, 0),
+	}
+
 	for _, v := range s.DriverAgents {
 		if v.Status == Roaming || v.Status == Allocating || v.Status == Matching {
 			count++
@@ -583,7 +620,7 @@ func SendDriverStats(s *Simulation) {
 					minCurrentEarning = v.CurrentTask.FinalValue
 				}
 				if v.CurrentTask.FinalValue > maxCurrentEarning {
-					fmt.Printf("[SendData] New Max - Task %v\n", v.CurrentTask.Id)
+					//fmt.Printf("[SendData] New Max - Task %v\n", v.CurrentTask.Id)
 					maxCurrentEarning = v.CurrentTask.FinalValue
 				}
 				totalCurrentEarning += v.CurrentTask.FinalValue
@@ -592,12 +629,28 @@ func SendDriverStats(s *Simulation) {
 		}
 
 		drf := &DriverRegretFormat{
-			EnvironmentId: v.E.Id,
-			DriverId:      v.Id,
-			Regret:        v.Regret,
+			EnvironmentId:    v.E.Id,
+			DriverId:         v.Id,
+			Regret:           v.Regret,
+			Motivation:       v.Motivation,
+			Reputation:       v.Reputation,
+			Fatigue:          v.Fatigue,
+			RankingIndex:     v.GetRawRankingIndex(),
+			CurrentTaskValue: v.CurrentTask.FinalValue,
+			TotalEarnings:    v.TotalEarnings,
 		}
-
+		sid.DriverStats = append(sid.DriverStats, *drf)
 		driversRegret = append(driversRegret, *drf)
+	}
+
+	// csv
+	if s.CaptureSimulationTime.Hour() != s.SimulationTime.Hour() || s.CaptureSimulationTime.Minute() != s.SimulationTime.Minute() {
+
+		sort.SliceStable(sid.DriverStats, func(i, j int) bool {
+			return sid.DriverStats[i].DriverId < sid.DriverStats[j].DriverId
+		})
+
+		s.StatsDriver = append(s.StatsDriver, *sid)
 	}
 
 	var averageTotalCurrentEarning float64 = 0
@@ -632,7 +685,7 @@ func SendDriverStats(s *Simulation) {
 		Min:     minCurrentEarning,
 	}
 
-	// 1,3
+	// 1,4
 	sendformat := &SendFormat{
 		Command:       1,
 		CommandSecond: 4,
@@ -650,7 +703,7 @@ func SendDriverStats(s *Simulation) {
 		DriversRegret: driversRegret,
 	}
 
-	// 1,4
+	// 1,5
 	sendformat2 := &SendFormat{
 		Command:       1,
 		CommandSecond: 5,
@@ -661,7 +714,7 @@ func SendDriverStats(s *Simulation) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	s.Send <- string(f) // send StatsRegretFormat
+	s.Send <- string(f) // send StatsRegretFormat - change to send DriverStats
 
 	sendformat3 := &SendFormat{
 		Command:       1,
@@ -706,7 +759,6 @@ func SendEnvironmentStats(s *Simulation) {
 
 	if s.CaptureSimulationTime.Hour() != s.SimulationTime.Hour() || s.CaptureSimulationTime.Minute() != s.SimulationTime.Minute() {
 		s.StatsVirus = append(s.StatsVirus, *svf)
-		s.CaptureSimulationTime = s.SimulationTime
 	}
 
 	sendformat := &SendFormat{
@@ -775,4 +827,102 @@ func (s *Simulation) GenerateVirusCSV() {
 	csvFile.Close()
 
 	s.SendMessageToClient("Virus data generated")
+}
+
+func (s *Simulation) GenerateIndividualDriverCSV() {
+	path := "./src/github.com/harrizontal/dispatchserver/assets/driver/"
+
+	result := fmt.Sprintf(path + "driver_data_Regret.csv")
+	fatiguePath := fmt.Sprintf(path + "driver_data_Fatigue.csv")
+	currentTaskValuePath := fmt.Sprintf(path + "driver_data_CurrentTaskValue.csv")
+	rankingIndexPath := fmt.Sprintf(path + "driver_data_RankingIndex.csv")
+	currentTotalEarningsPath := fmt.Sprintf(path + "driver_data_TotalEarnings.csv")
+	reputationPath := fmt.Sprintf(path + "driver_data_Reputation.csv")
+
+	csvFile, err := os.Create(result)
+	csvFatigue, _ := os.Create(fatiguePath)
+	csvCurrentTaskValue, _ := os.Create(currentTaskValuePath)
+	csvRankingIndex, _ := os.Create(rankingIndexPath)
+	csvTotalEarnings, _ := os.Create(currentTotalEarningsPath)
+	csvReputation, _ := os.Create(reputationPath)
+
+	if err != nil {
+		log.Fatalf("failed creating file: %s", err)
+	}
+
+	csvwriter := csv.NewWriter(csvFile)
+	csvFatigueWriter := csv.NewWriter(csvFatigue)
+	csvCurrentTaskValueWriter := csv.NewWriter(csvCurrentTaskValue)
+	csvRankingIndexWriter := csv.NewWriter(csvRankingIndex)
+	csvTotalEarningsWriter := csv.NewWriter(csvTotalEarnings)
+	csvReputationWriter := csv.NewWriter(csvReputation)
+
+	count := 0
+
+	// store valid drivers
+	validDrivers := make(map[int]struct{})
+	for _, d := range s.DriverAgents {
+		if d.Valid {
+			validDrivers[d.Id] = struct{}{}
+		} else {
+			fmt.Printf("Driver %d is invalid. Will be remove from csv\n", d.Id)
+		}
+	}
+
+	// write header
+	data := []string{"count", "time"}
+	for _, d := range s.StatsDriver[0].DriverStats {
+		_, ok := validDrivers[d.DriverId]
+		if ok {
+			data = append(data, strconv.Itoa(d.DriverId))
+		}
+	}
+	csvwriter.Write(data)
+	csvFatigueWriter.Write(data)
+	csvCurrentTaskValueWriter.Write(data)
+	csvRankingIndexWriter.Write(data)
+	csvTotalEarningsWriter.Write(data)
+	csvReputationWriter.Write(data)
+	// end of writing header
+
+	for _, row := range s.StatsDriver {
+		data := []string{strconv.Itoa(count),
+			row.Time}
+
+		dataFatigue := data
+		dataCTV := data
+		dataRankingIndex := data
+		dataTotalEarnings := data
+		dataReputation := data
+
+		for _, d := range row.DriverStats {
+			_, ok := validDrivers[d.DriverId]
+			if ok {
+				//s := fmt.Sprintf("%f", d.Fatigue)
+				data = append(data, strconv.Itoa(int(d.Regret)))
+				dataFatigue = append(dataFatigue, strconv.Itoa(int(d.Fatigue)))
+				dataCTV = append(dataCTV, fmt.Sprintf("%f", d.CurrentTaskValue))
+				dataRankingIndex = append(dataRankingIndex, strconv.Itoa(int(d.RankingIndex)))
+				dataTotalEarnings = append(dataTotalEarnings, fmt.Sprintf("%f", d.TotalEarnings))
+				dataReputation = append(dataReputation, fmt.Sprintf("%f", d.Reputation))
+			}
+		}
+		csvwriter.Write(data)
+		csvFatigueWriter.Write(dataFatigue)
+		csvCurrentTaskValueWriter.Write(dataCTV)
+		csvRankingIndexWriter.Write(dataRankingIndex)
+		csvTotalEarningsWriter.Write(dataTotalEarnings)
+		csvReputationWriter.Write(dataReputation)
+
+		count++
+	}
+
+	csvwriter.Flush()
+	csvFatigueWriter.Flush()
+	csvCurrentTaskValueWriter.Flush()
+	csvRankingIndexWriter.Flush()
+	csvTotalEarningsWriter.Flush()
+	csvReputationWriter.Flush()
+
+	s.SendMessageToClient("Finished generating driver's stats")
 }

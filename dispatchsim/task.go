@@ -20,6 +20,7 @@ type Task struct {
 	TaskEnded       time.Time // all time
 	Value           int
 	FinalValue      float64
+	RatingGiven     float64
 	Distance        float64
 	Valid           bool // valid -> task is reachable from a driver. invalid -> task is not reachable from 1 or more driver
 	Appear          bool // only appear when this order aligns with timeline
@@ -71,12 +72,12 @@ func CreateVirusTaskFromOrder(o Order, e *Environment, v Virus, wearMask bool) T
 	task := Task{
 		Id:              o.Id,
 		EnvironmentId:   e.Id,
-		RideStartTime:   o.RideStartTime,
+		RideStartTime:   o.RideStartTime, // task created
 		StartCoordinate: o.StartCoordinate,
 		EndCoordinate:   o.EndCoordinate,
 		PickUpLocation:  LatLng{Lat: o.PickUpLat, Lng: o.PickUpLng},
 		DropOffLocation: LatLng{Lat: o.DropOffLat, Lng: o.DropOffLng},
-		TaskCreated:     time.Now(),
+		TaskCreated:     ConvertUnixToTimeStamp(o.RideStartTime),
 		Value:           int(o.Distance), // random value from 1 to 10 (for now... TODO!)
 		FinalValue:      taskValue,
 		Distance:        o.Distance,
@@ -99,11 +100,17 @@ func GenerateRandomValue(min int, max int) int {
 func (t *Task) ComputeRating(s *Simulation) float64 {
 	switch s.TaskParameters.ReputationGivenType {
 	case "random":
-		return float64(GenerateRandomValue(0, 5))
+		x := float64(GenerateRandomValue(0, 5))
+		t.RatingGiven = x
+		return x
 	case "fixed":
-		return s.TaskParameters.ReputationValue
+		x := s.TaskParameters.ReputationValue
+		t.RatingGiven = x
+		return x
 	default:
-		return float64(GenerateRandomValue(0, 5)) // return int
+		x := float64(GenerateRandomValue(0, 5)) // return int
+		t.RatingGiven = x
+		return x
 	}
 }
 

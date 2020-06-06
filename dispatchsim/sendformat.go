@@ -30,6 +30,7 @@ type StatsRegretFormat struct {
 	DriversRegret []DriverRegretFormat `json:"drivers_regret"`
 }
 
+// for CSV
 type StatsVirusFormat struct {
 	Time           string `json:"time"`
 	TasksToDrivers int    `json:"tasks_to_drivers"`
@@ -51,7 +52,19 @@ type StatsCurrentEarningFormat struct {
 }
 
 type DriverRegretFormat struct {
-	EnvironmentId int     `json:"environment_id"` // not need for displaying in the front end
-	DriverId      int     `json:"driver_id"`
-	Regret        float64 `json:"regret"`
+	EnvironmentId    int     `json:"environment_id"` // not need for displaying in the front end
+	DriverId         int     `json:"driver_id"`
+	Regret           float64 `json:"regret"`
+	Motivation       float64 `json:"motivation"`
+	Reputation       float64 `json:"reputation"`
+	Fatigue          float64 `json:"fatigue"`
+	RankingIndex     float64 `json:"ranking_index"`
+	CurrentTaskValue float64 `json:"current_task_value"`
+	TotalEarnings    float64 `json:"total_earning"`
+}
+
+// for CSV
+type StatsIndividualDrivers struct {
+	Time        string               `json:"time"`
+	DriverStats []DriverRegretFormat `json:"driver_stats"`
 }

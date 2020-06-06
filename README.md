@@ -1,10 +1,14 @@
 # A Multi-Agent Ride Sharing System Simulation built with Golang (with infectious spread mechanism)
-`dispatchserver` is a simulator where it simulate a ride sharing system in Chengdu, China. The simulation can spawn smart driver agents that are able to complete a set of tasks (picking up passengers and fetching passengers to the stated destination). The simulator uses Websocket to communicate with a [map visualization tool](https://github.com/Harrizontal/Intelligent-Order-Matching-Sim)
+`dispatchserver` is a simulator where it simulate a ride sharing system in Chengdu, China. The simulation can spawn smart driver agents that are able to complete a set of tasks (picking up passengers and fetching passengers to the stated destination). The simulator uses Websocket to communicate with a [map visualization tool](https://github.com/Harrizontal/Intelligent-Order-Matching-Sim).
 
 ## Background
 The simulator is equipped with a novel order dispatch algorithm in large-scale on-demand ride-hailing platforms
 that take account of the dynamic characteristics associated with workers. Although most traditional order dispatch approaches generally focus on providing a better user experience for passengers and maximizing revenue by optimizing resource utilization, the proposed
 algorithm is designed to take into an account of the collective productivity of all workers and maximizing it opportunistically in response to stochastic changes in situational factors. This is also accompanied by a Multi-Agent Simulation to simulate the complex action and interactions of the drivers and passengers, and to analyze the effects of change in factors. After the implementation of the algorithm and simulation, we evaluated the effects in earnings, reputation and fatigue. In the most recent outbreak of the disease on COVID-19, the simulation also has a few mechanisms in showing how it spread among the drivers and passengers through the use of the proposed algorithm. 
+
+## Prerequisites (External)
+
+Please download the [map visualization tool](https://github.com/Harrizontal/Intelligent-Order-Matching-Sim).
 
 ## Getting started
 
@@ -12,9 +16,9 @@ algorithm is designed to take into an account of the collective productivity of 
 go get github.com/harrizontal/dispatchserver
 ```
 
-Please download the [map visualization tool](https://github.com/Harrizontal/Intelligent-Order-Matching-Sim)
 
-## Dependencies
+## Dependencies for the simulator
+Please download the packages before running the simulator
 
 ```
 go get github.com/gorilla/websocket
@@ -25,6 +29,8 @@ go get gonum.org/v1/gonum/graph
 go get golang.org/x/exp/rand
 ```
 
+
+# Available Scripts
 
 ## Running the Dispatcher simulator server
 
@@ -58,3 +64,7 @@ go run github.com/harrizontal/dispatchserver/cmd/dsfilterdata
 ```
 go run github.com/harrizontal/dispatchserver/cmd/dsroadnetwork
 ```
+
+
+## Drivers and virus data 
+The map visulization tool is able to generate data regarding to the drivers (reputation, fatigue, etc) and virus. It is stored under driver and virus folder under Assets folder. 
